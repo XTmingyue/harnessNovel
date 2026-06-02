@@ -121,17 +121,17 @@ novel config
 
 ```ini
 # 参考小说批次摘要提取（建议 flash 模型，速度快、成本低）
-DATA_BUILDER_MODEL=deepseek-chat
+DATA_BUILDER_MODEL=deepseek-v4-flash
 DATA_BUILDER_BASE_URL=https://api.deepseek.com
 DATA_BUILDER_API_KEY=your-api-key
 
 # 仿写辅助任务：世界观提取（建议 flash 模型）
-ADAPTIVE_BUILDER_LITE_MODEL=deepseek-chat
+ADAPTIVE_BUILDER_LITE_MODEL=deepseek-v4-flash
 ADAPTIVE_BUILDER_LITE_BASE_URL=https://api.deepseek.com
 ADAPTIVE_BUILDER_LITE_API_KEY=your-api-key
 
 # 仿写核心任务：大纲、卷纲、章纲、正文（建议 pro 模型，质量高）
-ADAPTIVE_BUILDER_MODEL=deepseek-chat
+ADAPTIVE_BUILDER_MODEL=deepseek-v4-pro
 ADAPTIVE_BUILDER_BASE_URL=https://api.deepseek.com
 ADAPTIVE_BUILDER_API_KEY=your-api-key
 ```
