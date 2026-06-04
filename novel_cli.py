@@ -74,6 +74,11 @@ def cmd_init(args):
     print(f"  参考小说：{name}")
     print(f"  文件位置：{dest}")
 
+    # Step 0: 拆分参考小说章节到独立文件
+    print()
+    from training.outline_builder import split_chapters_to_files
+    split_chapters_to_files(ws)
+
     # Step 1: 提取大纲（切分章节、批次摘要、卷纲）
     print()
     from training.outline_builder import run_outline_build
@@ -115,6 +120,12 @@ def cmd_novel_outline(args):
     ws = _ws(args.workspace)
     gen_novel_outline(ws, force=args.force, creative_direction=args.direction,
                       direction_file=args.direction_file)
+
+
+def cmd_novel_name_synopsis(args):
+    from training.adaptive_builder import gen_novel_name_synopsis
+    ws = _ws(args.workspace)
+    gen_novel_name_synopsis(ws, force=args.force)
 
 
 def cmd_volume_outline(args):
@@ -166,6 +177,11 @@ def main():
     p.add_argument("--direction", help="创作方向（字符串）")
     p.add_argument("--direction-file", help="创作方向文件路径")
 
+    # novel-name-synopsis
+    p = sub.add_parser("novel-name-synopsis", help="推荐书名与简介")
+    p.add_argument("workspace", help="工作区名称")
+    p.add_argument("--force", action="store_true")
+
     # volume-outline
     p = sub.add_parser("volume-outline", help="仿写生成卷纲")
     p.add_argument("workspace", help="工作区名称")
@@ -196,6 +212,7 @@ def main():
         "list": cmd_list,
         "init": cmd_init,
         "novel-outline": cmd_novel_outline,
+        "novel-name-synopsis": cmd_novel_name_synopsis,
         "volume-outline": cmd_volume_outline,
         "chapter-outlines": cmd_chapter_outlines,
         "write": cmd_write,

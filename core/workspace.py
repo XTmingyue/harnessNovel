@@ -15,12 +15,13 @@ class NovelWorkspace:
         self.reference = os.path.join(self.root, "reference")
         self.reference_outlines = os.path.join(self.reference, "outlines")
         self.reference_sample = os.path.join(self.reference, "sample_novel.txt")
+        self.reference_chapters = os.path.join(self.reference, "chapters")
 
     # ── 目录初始化 ──
 
     def ensure_dirs(self):
         """确保所有必要的子目录存在。子目录（worldviews、new_volume_outlines 等）由写入时自动创建。"""
-        for d in [self.root, self.file_system, self.reference, self.reference_outlines]:
+        for d in [self.root, self.file_system, self.reference, self.reference_outlines, self.reference_chapters]:
             os.makedirs(d, exist_ok=True)
 
 

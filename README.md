@@ -109,6 +109,12 @@
 pip install harnessNovel
 ```
 
+更新：
+
+```bash
+pip install --upgrade harnessNovel
+```
+
 安装后 `novel` 命令全局可用。
 
 ## 配置

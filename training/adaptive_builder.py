@@ -121,6 +121,10 @@ def gen_novel_outline(ws, force=False, creative_direction=None, direction_file=N
         print()
         _gen_new_novel_worldview_aggregated(ws, llm)
 
+        # 推荐书名与简介
+        print()
+        gen_novel_name_synopsis(ws, force=True)
+
         print(f"\n  -> 请审核编辑大纲和世界观后，再进行卷纲生成。")
 
 
@@ -198,6 +202,94 @@ def _gen_new_novel_worldview_aggregated(ws, llm):
     result = normalize_text(llm.generate(prompt))
     _write_file(aggregated_path, result)
     print(f"  -> 新小说全书世界观已保存：{aggregated_path}")
+
+
+def _extract_reference_name_synopsis(ws):
+    """从 sample_novel.txt 提取参考小说的书名和简介。
+
+    优先识别标记格式：
+        【书名】XXX
+        【简介】XXX（可多行）
+    无标记时走启发式兜底：第一行为书名，章节标题前的连续文本为简介。
+    """
+    if not os.path.exists(ws.reference_sample):
+        return "（未知）", "（未提供）"
+
+    with open(ws.reference_sample, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # 优先匹配标记格式
+    name_match = re.search(r'^【书名】(.+)', content, re.MULTILINE)
+    synopsis_match = re.search(r'^【简介】(.+?)(?=^【|^第[一二三四五六七八九十百千零\d]+[章回节])', content, re.MULTILINE | re.DOTALL)
+
+    if name_match:
+        name = name_match.group(1).strip()
+        synopsis = synopsis_match.group(1).strip() if synopsis_match else "（未提供）"
+        return name, synopsis
+
+    # 兜底：启发式提取
+    lines = content.split('\n')
+    name = ""
+    synopsis_lines = []
+    in_synopsis = False
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if in_synopsis and synopsis_lines:
+                break
+            continue
+
+        if not name:
+            name = stripped.strip("《》")
+            continue
+
+        if re.match(r'^第[一二三四五六七八九十百千零\d]+[章回节]', stripped):
+            break
+
+        in_synopsis = True
+        synopsis_lines.append(stripped)
+
+    synopsis = "\n".join(synopsis_lines) if synopsis_lines else "（未提取到简介）"
+    return name, synopsis
+
+
+def gen_novel_name_synopsis(ws, force=False):
+    """基于新小说大纲和世界观，推荐书名和简介。"""
+    novel_outline = _read_file(os.path.join(ws.file_system, "novel_outline.md"))
+    if not novel_outline:
+        print("错误：未找到新小说大纲，请先运行 novel-outline。")
+        return
+
+    output_path = os.path.join(ws.file_system, "novel_name_synopsis.md")
+    existing = _read_file(output_path)
+    if existing and not force:
+        print(f"书名与简介推荐已存在：{output_path}")
+        print("使用 --force 覆盖。")
+        return
+
+    worldview = _read_file(os.path.join(ws.file_system, "new_novel_worldview.md")) or ""
+    direction = _read_file(ws.creative_direction) or "（未提供）"
+    ref_name, ref_synopsis = _extract_reference_name_synopsis(ws)
+
+    llm = _get_llm()
+    if not llm:
+        return
+
+    print(">>> 推荐书名与简介 <<<")
+
+    prompt = PromptLoader.load(
+        "novel_name_synopsis",
+        reference_name=ref_name,
+        reference_synopsis=ref_synopsis,
+        novel_outline=novel_outline,
+        worldview=worldview or "（未生成世界观）",
+        creative_direction=direction,
+    )
+    result = normalize_text(llm.generate(prompt))
+    if result:
+        _write_file(output_path, result)
+        print(f"  -> 书名与简介已保存：{output_path}")
 
 
 def _map_to_reference_volumes_sequential(ws, vol_idx, ref_volumes):
@@ -661,18 +753,13 @@ def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
 
         print(f"\n--- 撰写第{ch_num}章（{idx + 1}/{len(pending)}）---")
 
-        # 读取前2章正文
+        # 读取前2章正文（不截断）
         prev_texts = []
         for i in range(max(1, ch_num - 2), ch_num):
             prev_file = os.path.join(out_dir, f"{i:03d}_第{i}章.md")
             content = _read_file(prev_file)
             if content:
-                # 取正文最后2000字
-                lines = content.strip().split('\n')
-                title = lines[0] if lines else ""
-                body = '\n'.join(lines[1:]) if len(lines) > 1 else ""
-                truncated = body[-2000:] if len(body) > 2000 else body
-                prev_texts.append(f"{title}\n{truncated}")
+                prev_texts.append(content.strip())
         history_section = "\n\n".join(prev_texts) if prev_texts else "（无前序正文，这是第一章）"
 
         # 读取本章对应的批次摘要
@@ -687,13 +774,15 @@ def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
             if batch_content:
                 batch_summary = batch_content
 
+        # 加载参考小说对应章节正文
+        from training.outline_builder import load_chapter_text
+        ref_chapter_text = load_chapter_text(ws, volume, ch_num, total_chapters)
+
         context = (
-            f"=== 写作规范 ===\n{writing_rules}\n\n"
-            f"=== 卷纲（卷{volume}）===\n{vol_outline}\n\n"
-            f"=== 本卷世界观 ===\n{vol_worldview}\n\n"
+            f"=== 前序正文 ===\n{history_section}\n\n"
             f"=== 章纲（第{ch_num}章）===\n{chapter_outline}\n\n"
-            + (f"=== 当前批次摘要（第{bs}-{be}章）===\n{batch_summary}\n\n" if batch_summary else "")
-            + f"=== 前序正文 ===\n{history_section}"
+            + (f"=== 参考小说本章正文 ===\n{ref_chapter_text}\n\n" if ref_chapter_text else "")
+            + f"=== 写作规范 ===\n{writing_rules}"
         )
 
         prompt = PromptLoader.load(

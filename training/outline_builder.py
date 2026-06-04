@@ -141,6 +141,117 @@ def group_chapters_by_volume(chapters, volumes):
     return groups
 
 
+def split_chapters_to_files(ws, output_dir_name="chapters"):
+    """拆分参考小说为逐章文件，保存到 reference/{output_dir_name}/ 下。"""
+    from core.chapter_utils import _fix_chapter_numbering, _int_to_cn, MAX_CHAPTERS_PER_VOLUME
+
+    base_dir = os.path.join(ws.reference, output_dir_name)
+    meta_path = os.path.join(base_dir, "_volumes.json")
+    if os.path.exists(meta_path):
+        print(f"章节拆分已存在，跳过。")
+        return
+
+    sample_path = ws.reference_sample
+    if not os.path.exists(sample_path):
+        print(f"错误：未找到参考小说文件 {sample_path}")
+        return
+
+    volumes, chapters = split_chapters(sample_path)
+    groups = group_chapters_by_volume(chapters, volumes)
+    print(f"解析出 {len(volumes)} 卷，{len(chapters)} 章")
+
+    _fix_chapter_numbering(groups)
+
+    # 拆分超大卷
+    split_groups = []
+    for g in groups:
+        vol_chapters = g["chapters"]
+        if len(vol_chapters) <= MAX_CHAPTERS_PER_VOLUME:
+            split_groups.append(g)
+            continue
+        num_parts = (len(vol_chapters) + MAX_CHAPTERS_PER_VOLUME - 1) // MAX_CHAPTERS_PER_VOLUME
+        part_labels = ["（上）", "（中）", "（下）"] if num_parts <= 3 else \
+                      [f"（第{_int_to_cn(i + 1)}部分）" for i in range(num_parts)]
+        for pi in range(num_parts):
+            start = pi * MAX_CHAPTERS_PER_VOLUME
+            end = start + MAX_CHAPTERS_PER_VOLUME
+            label = part_labels[pi] if pi < len(part_labels) else f"（第{pi + 1}部分）"
+            split_groups.append({
+                "title": g["title"] + label,
+                "chapters": vol_chapters[start:end],
+            })
+        print(f"  {g['title']}（{len(vol_chapters)} 章）→ 拆分为 {num_parts} 个子卷")
+
+    base_dir = os.path.join(ws.reference, output_dir_name)
+    vol_meta = []
+    saved = 0
+    vol_offset = 0
+    for vi, g in enumerate(split_groups):
+        vol_chapters = g["chapters"]
+        vol_dir_name = _vol_dir_name(vi, g["title"])
+        vol_dir = os.path.join(base_dir, vol_dir_name)
+        os.makedirs(vol_dir, exist_ok=True)
+
+        vol_meta.append({"title": g["title"], "dir": vol_dir_name})
+
+        for ci, ch in enumerate(vol_chapters):
+            global_ch = ci + 1 + vol_offset
+            safe_title = re.sub(r'[\\/:*?"<>|\s]', '_', ch["title"])[:50]
+            fname = f"{global_ch:03d}_{safe_title}.md"
+            fpath = os.path.join(vol_dir, fname)
+            lines = ch["content"].split("\n", 1)
+            corrected_content = ch["content"]
+            if len(lines) >= 2 and lines[0].strip() != ch["title"]:
+                corrected_content = f"{ch['title']}\n{lines[1]}" if len(lines) > 1 else ch["title"]
+            _write_file(fpath, corrected_content)
+            saved += 1
+
+        vol_offset += len(vol_chapters)
+        print(f"  {g['title']}: {len(vol_chapters)} 章 → {vol_dir_name}/")
+
+    with open(os.path.join(base_dir, "_volumes.json"), "w", encoding="utf-8") as f:
+        json.dump(vol_meta, f, ensure_ascii=False, indent=2)
+
+    print(f"\n共保存 {saved} 个章节文件到 {base_dir}")
+
+
+def load_chapter_text(ws, volume, chapter_num, total_chapters):
+    """从持久化的章节文件中加载参考小说对应章节正文。
+
+    使用卷内比例映射定位参考章节。找不到时返回空字符串。
+    """
+    base_dir = ws.reference_chapters
+    meta_path = os.path.join(base_dir, "_volumes.json")
+
+    if not os.path.exists(meta_path):
+        return ""
+
+    with open(meta_path, "r", encoding="utf-8") as f:
+        vol_meta = json.load(f)
+
+    vol_idx = volume - 1
+    if vol_idx >= len(vol_meta):
+        return ""
+
+    vol_dir = os.path.join(base_dir, vol_meta[vol_idx]["dir"])
+    if not os.path.isdir(vol_dir):
+        return ""
+
+    chapter_files = sorted(
+        f for f in os.listdir(vol_dir) if f.endswith(".md") and not f.startswith("_")
+    )
+    ref_vol_total = len(chapter_files)
+
+    if ref_vol_total == 0 or total_chapters <= 0:
+        return ""
+
+    ref_local_idx = int((chapter_num - 1) / total_chapters * ref_vol_total)
+    ref_local_idx = min(ref_local_idx, ref_vol_total - 1)
+
+    content = _read_file(os.path.join(vol_dir, chapter_files[ref_local_idx]))
+    return content if content else ""
+
+
 def _vol_dir_name(vol_idx, title):
     """生成卷目录名，如 vol_01_斩落金锁听玄音。"""
     safe = re.sub(r'[\\/:*?"<>|\s]', '_', title)[:30]
