@@ -1,0 +1,900 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HarnessNovel CLI 输入输出流程图</title>
+  <style>
+    :root {
+      --bg: #f7f8f5;
+      --ink: #1d2433;
+      --muted: #647084;
+      --line: #ccd5df;
+      --panel: #ffffff;
+      --panel-soft: #f1f5f8;
+      --cmd: #f0a64a;
+      --input: #3f8f70;
+      --mid: #7966c8;
+      --output: #3574b7;
+      --risk: #c95656;
+      --shadow: 0 12px 36px rgba(33, 42, 55, 0.08);
+      --radius: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.58;
+    }
+
+    header {
+      background: #17202f;
+      color: #fff;
+      padding: 28px 32px 24px;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 760;
+    }
+
+    header p {
+      margin: 10px 0 0;
+      max-width: 980px;
+      color: #d4dbe5;
+      font-size: 15px;
+    }
+
+    main {
+      width: min(1320px, calc(100% - 40px));
+      margin: 24px auto 56px;
+    }
+
+    .note {
+      display: grid;
+      grid-template-columns: 12px 1fr;
+      gap: 14px;
+      align-items: stretch;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+
+    .note::before {
+      content: "";
+      background: var(--cmd);
+    }
+
+    .note .content {
+      padding: 16px 18px 16px 4px;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.94em;
+      color: #18243a;
+      background: #e9edf2;
+      border-radius: 5px;
+      padding: 1px 5px;
+    }
+
+    .section-title {
+      margin: 30px 0 14px;
+      font-size: 20px;
+      font-weight: 760;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 16px 0 0;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: #dbe4ed;
+      font-size: 13px;
+    }
+
+    .legend i {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      display: inline-block;
+    }
+
+    .flow-board {
+      position: relative;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      border-radius: var(--radius);
+      padding: 24px;
+      overflow-x: auto;
+    }
+
+    .rail {
+      min-width: 1180px;
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 14px;
+      position: relative;
+    }
+
+    .rail::before {
+      content: "";
+      position: absolute;
+      top: 49px;
+      left: 7%;
+      right: 7%;
+      height: 3px;
+      background: linear-gradient(90deg, var(--cmd), var(--input), var(--mid), var(--output));
+      border-radius: 3px;
+      opacity: 0.72;
+    }
+
+    .flow-node {
+      position: relative;
+      z-index: 1;
+      min-height: 146px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-top: 5px solid var(--cmd);
+      border-radius: var(--radius);
+      padding: 14px 12px;
+    }
+
+    .flow-node strong {
+      display: block;
+      font-size: 15px;
+      margin-bottom: 8px;
+    }
+
+    .flow-node small {
+      color: var(--muted);
+      display: block;
+      font-size: 12px;
+    }
+
+    .flow-node .artifacts {
+      margin-top: 9px;
+      display: grid;
+      gap: 5px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      width: fit-content;
+      max-width: 100%;
+      border-radius: 5px;
+      padding: 2px 7px;
+      font-size: 12px;
+      color: #fff;
+      overflow-wrap: anywhere;
+    }
+
+    .pill.input { background: var(--input); }
+    .pill.mid { background: var(--mid); }
+    .pill.output { background: var(--output); }
+    .pill.risk { background: var(--risk); }
+
+    .mindmap-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    details.command {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    details.command > summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 16px 18px;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    details.command > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .summary-title {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .summary-title strong {
+      font-size: 17px;
+    }
+
+    .summary-title span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .chevron {
+      flex: 0 0 auto;
+      color: var(--muted);
+      transition: transform 0.18s ease;
+    }
+
+    details[open] .chevron {
+      transform: rotate(90deg);
+    }
+
+    .command-body {
+      border-top: 1px solid var(--line);
+      background: var(--panel-soft);
+      padding: 18px;
+    }
+
+    .branch {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 16px;
+      align-items: start;
+      margin: 0 0 14px;
+    }
+
+    .branch:last-child {
+      margin-bottom: 0;
+    }
+
+    .branch-label {
+      min-height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 5px;
+      color: #fff;
+      font-weight: 680;
+      font-size: 13px;
+    }
+
+    .branch-label.input { background: var(--input); }
+    .branch-label.step { background: var(--cmd); }
+    .branch-label.mid { background: var(--mid); }
+    .branch-label.output { background: var(--output); }
+    .branch-label.risk { background: var(--risk); }
+
+    .branch ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 8px;
+    }
+
+    .branch li {
+      position: relative;
+      background: #fff;
+      border: 1px solid #dce3ea;
+      border-radius: 6px;
+      padding: 8px 10px 8px 14px;
+      font-size: 14px;
+    }
+
+    .branch li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      background: #aab5c1;
+      border-radius: 6px 0 0 6px;
+    }
+
+    .chain {
+      background: var(--panel);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      border: 1px solid var(--line);
+      padding: 20px;
+      margin-top: 22px;
+    }
+
+    .chain-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .chain-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      padding: 13px;
+    }
+
+    .chain-card h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+    }
+
+    .chain-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .risk-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .risk-item {
+      border-left: 5px solid var(--risk);
+      background: #fff;
+      border-radius: 6px;
+      padding: 12px;
+      border-top: 1px solid #e1e6ec;
+      border-right: 1px solid #e1e6ec;
+      border-bottom: 1px solid #e1e6ec;
+      font-size: 14px;
+    }
+
+    @media (max-width: 980px) {
+      main {
+        width: min(100% - 24px, 1320px);
+      }
+
+      .mindmap-grid,
+      .chain-grid,
+      .risk-list {
+        grid-template-columns: 1fr;
+      }
+
+      .branch {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>HarnessNovel CLI 输入输出流程图</h1>
+    <p>把当前自动化写小说工作流拆成命令、阶段、输入、输出和下游引用，重点展示每一步的文件资产如何传递。</p>
+    <div class="legend">
+      <span><i style="background: var(--cmd)"></i>CLI 命令 / 处理步骤</span>
+      <span><i style="background: var(--input)"></i>输入</span>
+      <span><i style="background: var(--mid)"></i>中间资产</span>
+      <span><i style="background: var(--output)"></i>输出</span>
+      <span><i style="background: var(--risk)"></i>流程风险点</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="note">
+      <div class="content">
+        <strong>全局路径规则：</strong>
+        工作区由执行命令时的当前目录决定，形如 <code>&lt;当前目录&gt;/my-novels/&lt;小说名&gt;</code>。
+        例如当前案例常见路径是 <code>/Users/xiongtao/Documents/my-novels/大罗</code>。
+      </div>
+    </section>
+
+    <h2 class="section-title">总流程关系图</h2>
+    <section class="flow-board" aria-label="CLI 总流程">
+      <div class="rail">
+        <article class="flow-node">
+          <strong>init</strong>
+          <small>导入参考小说，拆章，提炼参考结构</small>
+          <div class="artifacts">
+            <span class="pill input">参考小说.txt</span>
+            <span class="pill output">reference/outlines</span>
+            <span class="pill output">reference/chapters</span>
+            <span class="pill output">reference_worldview.md</span>
+          </div>
+        </article>
+        <article class="flow-node">
+          <strong>world-import</strong>
+          <small>可选：导入目标世界资料，可多文件或目录</small>
+          <div class="artifacts">
+            <span class="pill input">封神样本 / 设定资料</span>
+            <span class="pill output">imports/manifest.json</span>
+          </div>
+        </article>
+        <article class="flow-node">
+          <strong>world-build</strong>
+          <small>可选：按资料和栏目构建分栏知识库</small>
+          <div class="artifacts">
+            <span class="pill input">imports</span>
+            <span class="pill mid">world cards</span>
+            <span class="pill output">worlds/资料名/栏目.md</span>
+            <span class="pill output">worlds/_final/栏目.md</span>
+          </div>
+        </article>
+        <article class="flow-node">
+          <strong>novel-outline</strong>
+          <small>参考结构 + 灵感，若有目标资料则增强校正</small>
+          <div class="artifacts">
+            <span class="pill input">direction</span>
+            <span class="pill mid">novel_outline_draft.md</span>
+            <span class="pill output">novel_outline.md</span>
+            <span class="pill output">new_novel_worldview.md</span>
+            <span class="pill output">rewrite_map.md</span>
+          </div>
+        </article>
+        <article class="flow-node">
+          <strong>volume-outline</strong>
+          <small>生成每卷的新卷纲和卷世界观</small>
+          <div class="artifacts">
+            <span class="pill input">novel_outline.md</span>
+            <span class="pill input">rewrite_map.md</span>
+            <span class="pill output">new_volume_outlines</span>
+            <span class="pill output">new_worldviews</span>
+          </div>
+        </article>
+        <article class="flow-node">
+          <strong>chapter-outlines</strong>
+          <small>先生成批次摘要，再生成逐章章纲</small>
+          <div class="artifacts">
+            <span class="pill mid">adapted_reference_batches</span>
+            <span class="pill mid">batch audits</span>
+            <span class="pill output">outlines/vol_xx</span>
+            <span class="pill output">chapter_outlines</span>
+          </div>
+        </article>
+        <article class="flow-node">
+          <strong>write</strong>
+          <small>按章纲、批次摘要和参考正文节奏生成正文</small>
+          <div class="artifacts">
+            <span class="pill input">chapter_NNN.md</span>
+            <span class="pill input">reference/chapters</span>
+            <span class="pill output">chapters/vol_xx</span>
+          </div>
+        </article>
+        <article class="flow-node">
+          <strong>name-synopsis</strong>
+          <small>独立或由 novel-outline 自动触发</small>
+          <div class="artifacts">
+            <span class="pill input">novel_outline.md</span>
+            <span class="pill output">novel_name_synopsis.md</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <h2 class="section-title">命令输入输出明细</h2>
+    <section class="mindmap-grid">
+      <details class="command" open>
+        <summary>
+          <span class="summary-title">
+            <strong><code>novel init 大罗 --txt 参考小说.txt</code></strong>
+            <span>建立项目，拆解参考小说，提炼参考书结构和世界观</span>
+          </span>
+          <span class="chevron">›</span>
+        </summary>
+        <div class="command-body">
+          <div class="branch">
+            <div class="branch-label input">输入</div>
+            <ul>
+              <li><code>--txt /path/to/参考小说.txt</code></li>
+              <li><code>--batch-size</code>，默认按 20 章左右生成批次摘要</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label step">内部步骤</div>
+            <ul>
+              <li>创建 <code>my-novels/大罗</code>、<code>reference</code>、<code>file_system</code></li>
+              <li>复制参考小说到 <code>reference/sample_novel.txt</code></li>
+              <li>拆分章节到 <code>reference/chapters</code></li>
+              <li>提炼参考批次摘要和参考卷纲到 <code>reference/outlines</code></li>
+              <li>如果只有单卷，尝试智能重分卷</li>
+              <li>根据参考卷纲提炼参考世界观</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label output">输出</div>
+            <ul>
+              <li><code>reference/sample_novel.txt</code></li>
+              <li><code>reference/chapters/vol_xx_xxx/chapter_001.md</code></li>
+              <li><code>reference/chapters/_volumes.json</code></li>
+              <li><code>reference/outlines/vol_xx_xxx/batch_001_020.md</code></li>
+              <li><code>file_system/worldviews/vol_xx_worldview.md</code></li>
+              <li><code>file_system/reference_worldview.md</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label mid">下游</div>
+            <ul>
+              <li><code>reference/outlines</code> 供新书大纲、分卷大纲、批次摘要使用</li>
+              <li><code>reference/chapters</code> 供正文生成阶段参考节奏</li>
+              <li><code>reference_worldview.md</code> 供新书世界观和映射表生成使用</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <details class="command" open>
+        <summary>
+          <span class="summary-title">
+            <strong><code>novel world-import 大罗 资料路径...</code></strong>
+            <span>导入目标世界资料，支持多个文件或目录</span>
+          </span>
+          <span class="chevron">›</span>
+        </summary>
+        <div class="command-body">
+          <div class="branch">
+            <div class="branch-label input">输入</div>
+            <ul>
+              <li><code>/path/to/封神主样本.txt</code></li>
+              <li><code>/path/to/封神设定资料/</code>，目录会递归导入</li>
+              <li><code>--force</code> 可覆盖已有导入</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label step">内部步骤</div>
+            <ul>
+              <li>识别输入路径是文件还是目录</li>
+              <li>目录内的资料文件会批量收集</li>
+              <li>写入导入区并生成 manifest 记录</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label output">输出</div>
+            <ul>
+              <li><code>file_system/world_knowledge/imports/</code></li>
+              <li><code>file_system/world_knowledge/imports/manifest.json</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label mid">下游</div>
+            <ul>
+              <li><code>world-build</code> 读取 imports 和 manifest，整理目标世界知识</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <details class="command" open>
+        <summary>
+          <span class="summary-title">
+            <strong><code>novel world-build 大罗</code></strong>
+            <span>将目标世界资料结构化成世界知识库</span>
+          </span>
+          <span class="chevron">›</span>
+        </summary>
+        <div class="command-body">
+          <div class="branch">
+            <div class="branch-label input">输入</div>
+            <ul>
+              <li><code>file_system/world_knowledge/imports/manifest.json</code></li>
+              <li><code>file_system/world_knowledge/imports/*</code></li>
+              <li><code>--chunk-size</code>，无章节结构时的切片大小</li>
+              <li><code>--chapter-batch-size</code>，按章节切片时的批次章数</li>
+              <li><code>--max-workers</code>，兼容旧版参数；当前全栏目汇总模式通常无需设置</li>
+              <li><code>--primary</code>，指定主资料；可填文件名、路径或资料 ID</li>
+              <li><code>--merge-only</code>，只基于已有 <code>worlds/&lt;资料名&gt;/*.md</code> 重建 <code>worlds/_final/</code> 和审计</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label step">内部步骤</div>
+            <ul>
+              <li>如果指定 <code>--primary</code>，以指定资料作为 primary 主资料</li>
+              <li>如果未指定 <code>--primary</code>，选择文件体积最大的资料作为 primary 主资料</li>
+              <li>其余资料作为 supplement 补充资料：不改主线，但可校正/完善力量体系、技能体系、法宝物品、角色实力背景和世界观细节</li>
+              <li>优先按章节切片，每批约 20 章</li>
+              <li>无法识别章节时，按字符长度切片</li>
+              <li>先抽取主资料 cards，并生成 <code>canon_index.md</code> 作为公共知识基准</li>
+              <li>补充资料提取 cards 时读取 <code>canon_index.md</code>，区分公共补充、样本原创和不确定内容</li>
+              <li>逐片提炼 7 类资料：世界观、力量体系、关键人物、势力描述、故事主线、关键物品、技能体系</li>
+              <li>每份资料内部按“2 张新 card + 上轮全栏目总结”串行汇总，一次生成 7 个栏目</li>
+              <li>将全栏目汇总结果拆写为 <code>worlds/&lt;资料名&gt;/世界观.md</code> 等分栏文件</li>
+              <li>按“主线守主资料、设定细节看信息质量”的规则，逐份整合补充资料到 <code>worlds/_final/</code></li>
+              <li>生成 <code>audits/supplement_usage_audit.md</code>，检查补充资料是否被过度过滤或未充分用于校正</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label output">输出</div>
+            <ul>
+              <li><code>file_system/world_knowledge/canon_index.md</code></li>
+              <li><code>file_system/world_knowledge/cards/</code></li>
+              <li><code>file_system/world_knowledge/partials/&lt;资料名&gt;/_all_sections/partial_001.md</code></li>
+              <li><code>file_system/world_knowledge/worlds/&lt;资料名&gt;/世界观.md</code></li>
+              <li><code>file_system/world_knowledge/worlds/&lt;资料名&gt;/力量体系.md</code></li>
+              <li><code>file_system/world_knowledge/worlds/_final/世界观.md</code></li>
+              <li><code>file_system/world_knowledge/worlds/_final/力量体系.md</code></li>
+              <li><code>file_system/world_knowledge/partials/_final/_all_sections/integrated_001_xxx.md</code></li>
+              <li><code>file_system/world_knowledge/audits/supplement_usage_audit.md</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label mid">下游</div>
+            <ul>
+              <li><code>novel-outline</code> 用它校验并修正新书初版设计</li>
+              <li>如果在 <code>novel-outline</code> 后才生成，需要重新跑 <code>novel novel-outline --force</code></li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <details class="command" open>
+        <summary>
+          <span class="summary-title">
+            <strong><code>novel novel-outline 大罗 --direction "灵感"</code></strong>
+            <span>生成新书全书大纲、总世界观和换皮映射表</span>
+          </span>
+          <span class="chevron">›</span>
+        </summary>
+        <div class="command-body">
+          <div class="branch">
+            <div class="branch-label input">输入</div>
+            <ul>
+              <li><code>--direction</code>、<code>--direction-file</code> 或 <code>creative_direction.md</code></li>
+              <li><code>reference/outlines</code></li>
+              <li><code>file_system/reference_worldview.md</code></li>
+              <li><code>file_system/world_knowledge/worlds/_final/*.md</code>，如果存在</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label step">内部步骤</div>
+            <ul>
+              <li>结合参考小说结构和用户灵感生成新书初版设计</li>
+              <li>如果存在目标世界知识库，则进行合理性调整；如果不存在，则自动跳过该步骤</li>
+              <li>输出最终全书大纲</li>
+              <li>根据全书大纲生成新书总世界观</li>
+              <li>根据新旧设定生成换皮映射表</li>
+              <li>自动生成书名简介</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label output">输出</div>
+            <ul>
+              <li><code>file_system/adaptation/novel_outline_draft.md</code></li>
+              <li><code>file_system/novel_outline.md</code></li>
+              <li><code>file_system/new_novel_worldview.md</code></li>
+              <li><code>file_system/adaptation/rewrite_map.md</code></li>
+              <li><code>file_system/novel_name_synopsis.md</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label mid">下游</div>
+            <ul>
+              <li><code>volume-outline</code> 读取全书大纲、总世界观和映射表</li>
+              <li><code>chapter-outlines</code> 读取全书大纲、总世界观和映射表做批次审计</li>
+              <li><code>write</code> 读取映射表和上游设计约束</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <details class="command">
+        <summary>
+          <span class="summary-title">
+            <strong><code>novel volume-outline 大罗</code></strong>
+            <span>生成每卷的新卷纲和新卷世界观</span>
+          </span>
+          <span class="chevron">›</span>
+        </summary>
+        <div class="command-body">
+          <div class="branch">
+            <div class="branch-label input">输入</div>
+            <ul>
+              <li><code>file_system/novel_outline.md</code></li>
+              <li><code>file_system/new_novel_worldview.md</code></li>
+              <li><code>file_system/adaptation/rewrite_map.md</code></li>
+              <li><code>reference/outlines/vol_xx_xxx</code></li>
+              <li><code>--volume</code> 可指定单卷</li>
+              <li><code>--direction</code> 可补充本次卷纲方向</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label step">内部步骤</div>
+            <ul>
+              <li>读取参考卷结构和新书总设计</li>
+              <li>如果映射表缺失，尝试自动补生成</li>
+              <li>生成单卷新大纲</li>
+              <li>基于单卷大纲生成单卷世界观</li>
+              <li>汇总所有分卷大纲</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label output">输出</div>
+            <ul>
+              <li><code>file_system/new_volume_outlines/vol_01_outline.md</code></li>
+              <li><code>file_system/new_worldviews/vol_01_worldview.md</code></li>
+              <li><code>file_system/volume_outline.md</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label mid">下游</div>
+            <ul>
+              <li><code>chapter-outlines</code> 用本卷大纲和本卷世界观生成批次摘要和章纲</li>
+              <li><code>write</code> 用本卷大纲和本卷世界观约束正文</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <details class="command">
+        <summary>
+          <span class="summary-title">
+            <strong><code>novel chapter-outlines 大罗 --volume 1</code></strong>
+            <span>先生成新批次摘要，再生成逐章章纲</span>
+          </span>
+          <span class="chevron">›</span>
+        </summary>
+        <div class="command-body">
+          <div class="branch">
+            <div class="branch-label input">输入</div>
+            <ul>
+              <li><code>file_system/novel_outline.md</code></li>
+              <li><code>file_system/new_novel_worldview.md</code></li>
+              <li><code>file_system/new_volume_outlines/vol_xx_outline.md</code></li>
+              <li><code>file_system/new_worldviews/vol_xx_worldview.md</code></li>
+              <li><code>file_system/adaptation/rewrite_map.md</code></li>
+              <li><code>reference/outlines/vol_xx_xxx/batch_001_020.md</code></li>
+              <li>前序新批次摘要和前两章章纲，如果存在</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label step">多步流程</div>
+            <ul>
+              <li>步骤 A：预改写参考批次，生成新世界节奏草稿</li>
+              <li>步骤 B：基于预改写草稿生成正式新批次摘要</li>
+              <li>步骤 C：用 pro 模型做剧情合理性审计，失败则重写一次</li>
+              <li>步骤 D：基于正式批次摘要生成逐章章纲</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label output">输出</div>
+            <ul>
+              <li><code>file_system/adaptation/adapted_reference_batches/vol_xx/batch_001_020.md</code></li>
+              <li><code>file_system/adaptation/batch_reasonability_audits/vol_xx/*.json</code></li>
+              <li><code>file_system/outlines/vol_xx/batch_001_020.md</code></li>
+              <li><code>file_system/chapter_outlines/vol_xx/chapter_001.md</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label mid">下游</div>
+            <ul>
+              <li><code>file_system/outlines</code> 作为正文生成的批次背景</li>
+              <li><code>file_system/chapter_outlines</code> 作为正文生成的直接蓝图</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <details class="command">
+        <summary>
+          <span class="summary-title">
+            <strong><code>novel write 大罗 --volume 1</code></strong>
+            <span>按照章纲生成正文</span>
+          </span>
+          <span class="chevron">›</span>
+        </summary>
+        <div class="command-body">
+          <div class="branch">
+            <div class="branch-label input">输入</div>
+            <ul>
+              <li><code>file_system/chapter_outlines/vol_xx/chapter_NNN.md</code></li>
+              <li><code>file_system/outlines/vol_xx/batch_XXX_YYY.md</code></li>
+              <li><code>file_system/new_volume_outlines/vol_xx_outline.md</code></li>
+              <li><code>file_system/new_worldviews/vol_xx_worldview.md</code></li>
+              <li><code>file_system/adaptation/rewrite_map.md</code></li>
+              <li><code>reference/chapters</code> 中按比例匹配的参考章节</li>
+              <li>前两章正文，如果存在</li>
+              <li><code>core/system_prompt.md</code> 和 <code>core/agents.md</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label step">内部步骤</div>
+            <ul>
+              <li>确定要生成的章节范围，支持 <code>--start</code> 和 <code>--max</code></li>
+              <li>读取章纲、批次摘要、卷纲、卷世界观、映射表</li>
+              <li>读取对应参考章节作为节奏和写法样本</li>
+              <li>调用正文生成模型</li>
+              <li>写入章节正文</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label output">输出</div>
+            <ul>
+              <li><code>file_system/chapters/vol_xx/001_第1章.md</code></li>
+              <li><code>file_system/chapters/vol_xx/002_第2章.md</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label risk">注意点</div>
+            <ul>
+              <li>正文阶段仍会直接读取参考章节文本，参考污染风险没有完全消失</li>
+              <li>当前正文阶段仍存在静态残留扫描逻辑，后续可按你的新思路继续收敛</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <details class="command">
+        <summary>
+          <span class="summary-title">
+            <strong><code>novel novel-name-synopsis 大罗</code></strong>
+            <span>生成或重生成书名简介</span>
+          </span>
+          <span class="chevron">›</span>
+        </summary>
+        <div class="command-body">
+          <div class="branch">
+            <div class="branch-label input">输入</div>
+            <ul>
+              <li><code>file_system/novel_outline.md</code></li>
+              <li><code>file_system/new_novel_worldview.md</code></li>
+              <li><code>creative_direction.md</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label step">内部步骤</div>
+            <ul>
+              <li>根据全书大纲、世界观和灵感生成书名、简介、卖点</li>
+              <li><code>novel-outline</code> 当前会自动触发一次本能力</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label output">输出</div>
+            <ul>
+              <li><code>file_system/novel_name_synopsis.md</code></li>
+            </ul>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="chain">
+      <h2 class="section-title" style="margin-top:0">关键资产传递链</h2>
+      <div class="chain-grid">
+        <article class="chain-card">
+          <h3>参考小说链</h3>
+          <p><code>sample_novel.txt</code> → <code>reference/chapters</code> + <code>reference/outlines</code> → 新书结构、批次节奏、正文节奏。</p>
+        </article>
+        <article class="chain-card">
+          <h3>目标世界链</h3>
+          <p>可选增强链：<code>world-import</code> → <code>world-build</code> → <code>worlds/_final/*.md</code> → 新书大纲合理性调整。没有这条链时，<code>novel-outline</code> 会自动降级。</p>
+        </article>
+        <article class="chain-card">
+          <h3>换皮约束链</h3>
+          <p><code>novel_outline.md</code> + <code>new_novel_worldview.md</code> → <code>rewrite_map.md</code> → 分卷、批次、正文。</p>
+        </article>
+        <article class="chain-card">
+          <h3>正文生成链</h3>
+          <p><code>batch summary</code> → <code>chapter outline</code> → <code>chapter text</code>，其中正文仍会参考原书章节文本。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="chain">
+      <h2 class="section-title" style="margin-top:0">当前流程风险点</h2>
+      <div class="risk-list">
+        <div class="risk-item">目标世界资料库是可选增强；如果 <code>world-build</code> 晚于 <code>novel-outline</code> 执行，目标世界资料不会自动进入既有大纲，需要重新跑 <code>novel novel-outline --force</code>。</div>
+        <div class="risk-item"><code>novel-outline</code> 同时负责全书大纲、世界观、映射表、书名简介，职责较重，任一中间产物污染都会向后传播。</div>
+        <div class="risk-item"><code>chapter-outlines</code> 同时生成批次摘要和章纲。若只想重跑合理性审计，目前没有独立命令。</div>
+        <div class="risk-item"><code>write</code> 阶段仍读取参考正文，若 prompt 约束不足，旧世界细节可能重新进入正文。</div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
