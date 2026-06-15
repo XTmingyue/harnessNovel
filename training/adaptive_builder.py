@@ -7,8 +7,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from core.llm_provider import LLMProvider
 from core.prompt_loader import PromptLoader
 from core.config import ConfigLoader
-from core.text_utils import normalize_text
+from core.text_utils import normalize_text, parse_json_response
 from core.workspace import init_workspace
+from core.adaptation import (
+    append_adaptation_report,
+    format_forbidden_terms,
+    load_forbidden_terms,
+    load_rewrite_map,
+    scan_forbidden_terms,
+)
+from core.world_knowledge import (
+    build_world_knowledge,
+    import_world_sources,
+    load_world_knowledge_context,
+)
 from training.reference_finder import (
     list_reference_volumes,
     load_reference_novel_outline,
@@ -56,10 +68,35 @@ def _load_outline_rules(ws):
     return rules or "（无大纲设计规则）"
 
 
+def _load_world_knowledge_optional(ws, purpose):
+    """加载目标世界知识库；不存在时降级为纯参考小说+创作方向流程。"""
+    world_knowledge = load_world_knowledge_context(ws)
+    if world_knowledge:
+        print(f"  -> 已加载目标世界资料库用于{purpose}。")
+        return world_knowledge
+    print(f"  -> 未检测到目标世界资料库，跳过{purpose}。")
+    print("     需要资料库增强时，可先运行 novel world-import / novel world-build。")
+    return ""
+
+
 def _write_file(path, content):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         f.write(content + "\n")
+
+
+def _audit_text(ws, label, text, forbidden_terms, exempt_line_patterns=None):
+    """轻量审计生成文本中的参考元素残留，返回违规词列表。"""
+    violations = scan_forbidden_terms(
+        text,
+        forbidden_terms,
+        exempt_line_patterns=exempt_line_patterns,
+    )
+    if violations:
+        msg = f"{label} 检测到疑似参考元素残留：{', '.join(violations)}"
+        print(f"  警告：{msg}")
+        append_adaptation_report(ws, label, msg)
+    return violations
 
 
 def _load_creative_direction(ws, cli_input=None, direction_file=None):
@@ -86,6 +123,47 @@ def _load_creative_direction(ws, cli_input=None, direction_file=None):
         if body.strip():
             return cleaned
     return ""
+
+
+def _gen_rewrite_map(ws, llm, force=False):
+    """基于参考与新书方案生成全书换皮映射表，供后续阶段硬约束。"""
+    adaptation_dir = os.path.join(ws.file_system, "adaptation")
+    output_path = os.path.join(adaptation_dir, "rewrite_map.md")
+    existing = _read_file(output_path)
+    if existing and not force:
+        print(f"换皮映射表已存在：{output_path}")
+        return existing
+
+    reference_outline = load_reference_novel_outline(ws.reference_outlines)
+    reference_worldview = _read_file(os.path.join(ws.file_system, "reference_worldview.md")) or ""
+    novel_outline = _read_file(os.path.join(ws.file_system, "novel_outline.md")) or ""
+    new_worldview = _read_file(os.path.join(ws.file_system, "new_novel_worldview.md")) or ""
+
+    if not reference_outline or not novel_outline:
+        print("  警告：参考大纲或新小说大纲缺失，暂不生成换皮映射表。")
+        return ""
+
+    print(">>> 生成全书换皮映射表 <<<")
+    prompt = PromptLoader.load(
+        "rewrite_map_extract",
+        reference_outline=reference_outline,
+        reference_worldview=reference_worldview or "（未提取参考世界观）",
+        novel_outline=novel_outline,
+        new_novel_worldview=new_worldview or "（未生成新小说世界观）",
+    )
+    result = normalize_text(llm.generate(prompt))
+    if result:
+        _write_file(output_path, result)
+        print(f"  -> 换皮映射表已保存：{output_path}")
+    return result
+
+
+def _ensure_rewrite_map(ws, llm):
+    """确保旧工作区在后续阶段也能补齐换皮映射表。"""
+    output_path = os.path.join(ws.file_system, "adaptation", "rewrite_map.md")
+    if _read_file(output_path):
+        return
+    _gen_rewrite_map(ws, llm, force=False)
 
 
 def gen_novel_outline(ws, force=False, creative_direction=None, direction_file=None, preserved_content=None):
@@ -121,6 +199,10 @@ def gen_novel_outline(ws, force=False, creative_direction=None, direction_file=N
         print()
         _gen_new_novel_worldview_aggregated(ws, llm)
 
+        # 生成后续阶段共用的换皮映射表
+        print()
+        _gen_rewrite_map(ws, llm, force=force)
+
         # 推荐书名与简介
         print()
         gen_novel_name_synopsis(ws, force=True)
@@ -150,7 +232,27 @@ def _gen_novel_outline_single_ref(ws, llm, direction, preserved_content=None):
         outline_rules=_load_outline_rules(ws),
         preserved_content=preserved_section,
     )
-    return normalize_text(llm.generate(prompt))
+    draft = normalize_text(llm.generate(prompt))
+    world_knowledge = _load_world_knowledge_optional(ws, "新小说大纲合理性校正")
+    if not world_knowledge:
+        return draft
+
+    draft_path = os.path.join(ws.file_system, "adaptation", "novel_outline_draft.md")
+    _write_file(draft_path, draft)
+    print(f"  -> 新小说大纲初稿已保存：{draft_path}")
+    print(">>> 基于目标世界资料库校正新小说大纲 <<<")
+
+    adjust_prompt = PromptLoader.load(
+        "novel_outline_world_adjust",
+        creative_direction=direction or "（用户未提供具体方向，请自主发挥创意）",
+        reference_worldview=reference_worldview,
+        reference_outline=reference_outline,
+        world_knowledge=world_knowledge,
+        outline_rules=_load_outline_rules(ws),
+        preserved_content=preserved_section,
+        draft_outline=draft,
+    )
+    return normalize_text(llm.generate(adjust_prompt))
 
 
 def _gen_new_novel_worldview_aggregated(ws, llm):
@@ -173,35 +275,58 @@ def _gen_new_novel_worldview_aggregated(ws, llm):
         return
 
     print(">>> 生成新小说全书世界观 <<<")
+    world_knowledge = _load_world_knowledge_optional(ws, "新小说全书世界观校正")
+    world_knowledge_section = (
+        "【目标世界知识库】（合理性校验优先级高于参考小说旧世界观）\n"
+        + world_knowledge
+        + "\n\n"
+        if world_knowledge
+        else ""
+    )
 
-    prompt = (
-        "你是一个专业的小说世界观设计专家。请基于参考小说的完整世界观，结合作者新小说大纲中的设定变更，"
-        "进行换皮映射，生成新小说的完整世界观。\n\n"
-        "这不是重新设计世界观，而是基于参考世界观的换皮映射。\n\n"
-        "【新小说大纲】\n" + novel_outline + "\n\n"
-        "【参考小说世界观】（换皮映射的源）\n" + ref_wv + "\n\n"
-        "【换皮映射要求】\n"
-        "1. 势力与人物：替换势力名、人物名。新大纲中新增的角色和势力补充进来，参考中删减的角色删掉。\n"
-        '2. 修炼体系：根据新大纲重新设计境界名称、数量、突破条件，不能照搬参考体系名称。\n'
-        "3. 特殊物品：替换法宝、丹药、灵物名称，功能对应，名称更换。\n"
-        "4. 地理场景：替换地名，地理结构对应，名称更换。\n"
-        "5. 种族与族群：替换种族名，特征对应。\n"
-        "6. 核心规则与禁忌：保持框架，调整表述。\n"
-        "7. 主角金手指进展：根据新大纲金手指设计，映射参考的进展节点。\n\n"
-        "输出要求：每个方面必须列出具体名称，不能概括。\n"
-        "使用纯文本输出，禁止使用 Markdown 格式符号。标题使用 # 标记。段落之间用空行分隔。\n\n"
-        "按以下结构输出：\n"
-        "一、势力与人物\n"
-        "二、修炼体系\n"
-        "三、特殊物品\n"
-        "四、地理场景\n"
-        "五、种族与族群\n"
-        "六、核心规则与禁忌\n"
-        "七、主角金手指进展"
+    prompt = PromptLoader.load(
+        "new_novel_worldview",
+        novel_outline=novel_outline,
+        world_knowledge_section=world_knowledge_section,
+        reference_worldview=ref_wv,
     )
     result = normalize_text(llm.generate(prompt))
     _write_file(aggregated_path, result)
     print(f"  -> 新小说全书世界观已保存：{aggregated_path}")
+
+
+def import_target_world_sources(ws, paths, force=False):
+    """导入目标题材资料到工作区。"""
+    result = import_world_sources(ws, paths, force=force)
+    for path in result["imported"]:
+        print(f"  已导入：{path}")
+    for path in result["skipped"]:
+        print(f"  已存在，跳过：{path}")
+    for path in result["unsupported"]:
+        print(f"  不支持的文件类型，跳过：{path}")
+    for path in result["missing"]:
+        print(f"  文件不存在，跳过：{path}")
+    print(f"  -> manifest：{result['manifest']}")
+    return result
+
+
+def build_target_world_knowledge(ws, force=False, chunk_size=12000, chapter_batch_size=20,
+                                 max_workers=None, primary_source=None, merge_only=False):
+    """将已导入资料结构化为目标世界知识库。"""
+    llm = _get_lite_llm()
+    if not llm:
+        return None
+    print(">>> 构建目标世界知识库 <<<")
+    return build_world_knowledge(
+        ws,
+        llm,
+        force=force,
+        chunk_size=chunk_size,
+        chapter_batch_size=chapter_batch_size,
+        max_workers=max_workers,
+        primary_source=primary_source,
+        merge_only=merge_only,
+    )
 
 
 def _extract_reference_name_synopsis(ws):
@@ -335,30 +460,61 @@ def _gen_volume_worldview(ws, vol_idx, llm, force, novel_outline, new_novel_worl
     os.makedirs(new_wv_dir, exist_ok=True)
     print(f"  -> 生成卷{vol_idx}世界观...")
 
-    prompt = (
-        "你是一个专业的小说世界观设计专家。请基于新小说的全书世界观，结合本卷卷纲的具体内容，"
-        "细化生成指定卷的详细世界观设定。\n\n"
-        "【新小说全书世界观】\n" + new_novel_worldview + "\n\n"
-        "【本卷卷纲】\n" + current_vol_text + "\n\n"
-        + (f"【上一卷世界观】（保持世界观演进的一致性）\n{prev_wv}\n\n" if prev_wv else "")
-        + (f"【本卷旧世界观】（参考已有设定，在此基础上升级）\n{old_wv}\n\n" if old_wv else "")
-        + "【要求】\n"
-        "1. 以全书世界观为基础，细化到本卷涉及的具体势力、人物、地点、物品。\n"
-        "2. 体现世界观在本卷中的演进：新势力登场、角色成长、新区域解锁等。\n"
-        "3. 与上一卷世界观保持连续性，不要出现矛盾设定。\n"
-        "4. 每个方面必须列出具体名称，不能概括。\n"
-        "5. 使用纯文本输出，禁止使用 Markdown 格式符号。标题使用 # 标记。段落之间用空行分隔。\n\n"
-        "按以下结构输出：\n"
-        "一、势力与人物\n"
-        "二、修炼体系\n"
-        "三、特殊物品\n"
-        "四、地理场景\n"
-        "五、种族与族群\n"
-        "六、核心规则与禁忌\n"
-        "七、主角金手指进展"
-    )
-    result = normalize_text(llm.generate(prompt))
+    rewrite_map = load_rewrite_map(ws, vol_idx)
+    forbidden_terms = load_forbidden_terms(ws, vol_idx)
+    forbidden_terms_text = format_forbidden_terms(forbidden_terms)
+
+    result = ""
+    audit_feedback = ""
+    violations = []
+    for attempt in range(2):
+        prompt = (
+            "你是一个专业的小说世界观设计专家。请基于新小说的全书世界观，结合本卷卷纲的具体内容，"
+            "细化生成指定卷的详细世界观设定。\n\n"
+            "【新小说全书世界观】\n" + new_novel_worldview + "\n\n"
+            "【本卷卷纲】\n" + current_vol_text + "\n\n"
+            "【换皮映射表】（必须遵守）\n" + rewrite_map + "\n\n"
+            "【禁止残留的参考元素】\n" + forbidden_terms_text + "\n\n"
+            + (f"【上一卷世界观】（保持世界观演进的一致性）\n{prev_wv}\n\n" if prev_wv else "")
+            + (f"【本卷旧世界观】（参考已有设定，在此基础上升级）\n{old_wv}\n\n" if old_wv else "")
+            + (audit_feedback + "\n\n" if audit_feedback else "")
+            + "【要求】\n"
+            "1. 以全书世界观为基础，细化到本卷涉及的具体势力、人物、地点、物品。\n"
+            "2. 体现世界观在本卷中的演进：新势力登场、角色成长、新区域解锁等。\n"
+            "3. 与上一卷世界观保持连续性，不要出现矛盾设定。\n"
+            "4. 每个方面必须列出具体名称，不能概括。\n"
+            "5. 不能把参考小说旧世界的事件、人物、时间线和宗教因果固化为新世界观事实。\n"
+            "6. 若本卷卷纲中的“对应参考小说”说明包含旧名词，只能理解为映射说明，不能写入新世界观正文。\n"
+            "7. 输出前自检：若出现禁止残留参考元素，必须改写为新世界观对应元素或删除。\n"
+            "8. 使用纯文本输出，禁止使用 Markdown 格式符号。标题使用 # 标记。段落之间用空行分隔。\n\n"
+            "按以下结构输出：\n"
+            "一、势力与人物\n"
+            "二、修炼体系\n"
+            "三、特殊物品\n"
+            "四、地理场景\n"
+            "五、种族与族群\n"
+            "六、核心规则与禁忌\n"
+            "七、主角金手指进展"
+        )
+        result = normalize_text(llm.generate(prompt))
+        violations = scan_forbidden_terms(
+            result,
+            forbidden_terms,
+            exempt_line_patterns=["对应参考", "参考小说", "映射说明"],
+        )
+        if not violations:
+            break
+        print(f"  卷{vol_idx}世界观检测到参考元素残留：{', '.join(violations)}，尝试重写...")
+        audit_feedback = (
+            f"【上次世界观违规项】\n"
+            f"上次输出把以下参考元素写入了新世界观正文：{', '.join(violations)}。\n"
+            "请根据换皮映射表改写或删除这些旧世界元素，不要把它们固化为新设定。"
+        )
+
     _write_file(vol_wv_path, result)
+    if violations:
+        _audit_text(ws, f"卷{vol_idx}世界观", result, forbidden_terms,
+                    exempt_line_patterns=["对应参考", "参考小说", "映射说明"])
     print(f"  -> 卷{vol_idx}世界观已保存：{vol_wv_path}")
 
 
@@ -391,30 +547,55 @@ def _gen_single_volume(ws, vol_idx, ref_volumes, force, creative_direction, llm,
     new_novel_worldview = _read_file(os.path.join(ws.file_system, "new_novel_worldview.md")) or "（无新小说世界观，请先运行 novel-outline 命令）"
 
     ref_vol_outline = _map_to_reference_volumes_sequential(ws, vol_idx, ref_volumes)
+    rewrite_map = load_rewrite_map(ws, vol_idx)
+    forbidden_terms = load_forbidden_terms(ws, vol_idx)
 
     preserved_section = ""
     if preserved_content:
         preserved_section = f"【已有定稿中值得保留的卷纲内容】\n以下内容来自已定稿章节的分析，重新生成卷纲时必须保留这些内容的延续性：\n{preserved_content}"
 
-    prompt = PromptLoader.load(
-        "adaptive_volume_outline",
-        novel_outline=novel_outline,
-        reference_volume_outline=ref_vol_outline or "（无参考卷纲）",
-        new_novel_worldview=new_novel_worldview,
-        inspirations="（无灵感库）",
-        volume_index=vol_idx,
-        creative_direction=direction or "（用户未提供具体方向）",
-        previous_volumes=previous_volumes,
-        outline_rules=_load_outline_rules(ws),
-        preserved_content=preserved_section,
-    )
-    result = normalize_text(llm.generate(prompt))
+    result = ""
+    audit_feedback = ""
+    violations = []
+    for attempt in range(2):
+        prompt = PromptLoader.load(
+            "adaptive_volume_outline",
+            novel_outline=novel_outline,
+            reference_volume_outline=ref_vol_outline or "（无参考卷纲）",
+            new_novel_worldview=new_novel_worldview,
+            rewrite_map=rewrite_map,
+            inspirations="（无灵感库）",
+            volume_index=vol_idx,
+            creative_direction=direction or "（用户未提供具体方向）",
+            previous_volumes=previous_volumes,
+            outline_rules=_load_outline_rules(ws),
+            preserved_content=preserved_section,
+            audit_feedback=audit_feedback,
+        )
+        result = normalize_text(llm.generate(prompt))
+        result_for_scan = re.sub(r'\n?\[(?:FINISHED|CONTINUE)\]\s*$', '', result).strip()
+        violations = scan_forbidden_terms(
+            result_for_scan,
+            forbidden_terms,
+            exempt_line_patterns=["对应参考", "参考小说", "映射说明"],
+        )
+        if not violations:
+            break
+        print(f"  卷{vol_idx}卷纲检测到参考元素残留：{', '.join(violations)}，尝试重写...")
+        audit_feedback = (
+            f"【上次卷纲违规项】\n"
+            f"上次输出在非“对应参考小说/映射说明”的正文设定中出现了：{', '.join(violations)}。\n"
+            "请保留卷纲结构和新小说设定，改写或删除这些旧世界元素。"
+        )
 
     if not result:
         return False
 
     is_finished = result.rstrip().endswith("[FINISHED]")
     result_clean = re.sub(r'\n?\[(?:FINISHED|CONTINUE)\]\s*$', '', result).strip()
+    if violations:
+        _audit_text(ws, f"卷{vol_idx}卷纲", result_clean, forbidden_terms,
+                    exempt_line_patterns=["对应参考", "参考小说", "映射说明"])
 
     # 写入按卷文件（保留 [FINISHED] 标记以便重跑时检测）
     marker = "\n[FINISHED]" if is_finished else "\n[CONTINUE]"
@@ -475,6 +656,7 @@ def gen_volume_outline(ws, volume=None, force=False, creative_direction=None, pr
     llm = _get_llm()
     if not llm:
         return
+    _ensure_rewrite_map(ws, llm)
 
     if volume is not None:
         if volume < 1 or volume > MAX_VOLUMES:
@@ -521,6 +703,203 @@ def _novel_outlines_dir(ws):
     return os.path.join(ws.file_system, "outlines")
 
 
+def _adapted_reference_batch_path(ws, volume, start_ch, end_ch):
+    return os.path.join(
+        ws.file_system,
+        "adaptation",
+        "adapted_reference_batches",
+        f"vol_{volume:02d}",
+        f"batch_{start_ch:03d}_{end_ch:03d}.md",
+    )
+
+
+def _adapt_reference_batch(ws, llm, volume, batch_idx, start_ch, end_ch,
+                           vol_outline, vol_worldview, reference_batch,
+                           rewrite_map, forbidden_terms, force=False):
+    """先将参考批次改写为目标世界可用的节奏草稿，降低旧设定污染。"""
+    if not reference_batch:
+        return "（无参考批次数据）"
+
+    out_path = _adapted_reference_batch_path(ws, volume, start_ch, end_ch)
+    existing = _read_file(out_path)
+    if existing and not force:
+        return existing
+
+    forbidden_terms_text = format_forbidden_terms(forbidden_terms)
+    audit_feedback = ""
+    result = ""
+    violations = []
+
+    for attempt in range(2):
+        prompt = PromptLoader.load(
+            "adapt_reference_batch",
+            volume_outline=vol_outline,
+            volume_worldview=vol_worldview,
+            rewrite_map=rewrite_map,
+            forbidden_terms=forbidden_terms_text,
+            batch_index=batch_idx,
+            start_chapter=start_ch,
+            end_chapter=end_ch,
+            reference_batch=reference_batch,
+            audit_feedback=audit_feedback,
+        )
+        result = normalize_text(llm.generate(prompt))
+        violations = scan_forbidden_terms(result, forbidden_terms)
+        if not violations:
+            _write_file(out_path, result)
+            return result
+
+        audit_feedback = (
+            f"【上次适配草稿违规项】\n"
+            f"仍然出现了以下禁止残留参考元素：{', '.join(violations)}。\n"
+            "请重新适配，不要保留这些旧世界元素；若无自然对应物，必须功能替代、删除或延后。"
+        )
+        print(f"  参考批次适配仍有残留：{', '.join(violations)}，尝试重写...")
+
+    _write_file(out_path, result)
+    append_adaptation_report(
+        ws,
+        f"卷{volume}批次{batch_idx}参考批次适配残留",
+        f"文件：{out_path}\n违规项：{', '.join(violations)}",
+    )
+    return result
+
+
+def _batch_audit_path(ws, volume, batch_idx, start_ch, end_ch, attempt):
+    return os.path.join(
+        ws.file_system,
+        "adaptation",
+        "batch_reasonability_audits",
+        f"vol_{volume:02d}",
+        f"batch_{start_ch:03d}_{end_ch:03d}_attempt_{attempt}.json",
+    )
+
+
+def _audit_batch_summary_reasonability(ws, llm, volume, batch_idx, start_ch, end_ch,
+                                       vol_outline, vol_worldview, previous_batch,
+                                       reference_batch, adapted_reference_batch,
+                                       rewrite_map, batch_summary, attempt):
+    """用 pro 模型审计批次摘要是否符合新书大纲/世界观，而不是做简单禁词扫描。"""
+    novel_outline = _read_file(os.path.join(ws.file_system, "novel_outline.md")) or "（未找到新小说全书大纲）"
+    new_novel_worldview = _read_file(os.path.join(ws.file_system, "new_novel_worldview.md")) or "（未找到新小说全书世界观）"
+
+    prompt = PromptLoader.load(
+        "batch_reasonability_audit",
+        novel_outline=novel_outline,
+        new_novel_worldview=new_novel_worldview,
+        volume_outline=vol_outline,
+        volume_worldview=vol_worldview,
+        rewrite_map=rewrite_map,
+        batch_index=batch_idx,
+        start_chapter=start_ch,
+        end_chapter=end_ch,
+        previous_batch=previous_batch,
+        adapted_reference_batch=adapted_reference_batch or "（无适配后的参考批次草稿）",
+        reference_batch=reference_batch or "（无参考批次数据）",
+        batch_summary=batch_summary,
+    )
+    raw = normalize_text(llm.generate(prompt))
+    audit_path = _batch_audit_path(ws, volume, batch_idx, start_ch, end_ch, attempt)
+    _write_file(audit_path, raw)
+
+    try:
+        audit = parse_json_response(raw)
+    except Exception as e:
+        append_adaptation_report(
+            ws,
+            f"卷{volume}批次{batch_idx}合理性审计解析失败",
+            f"文件：{audit_path}\n错误：{e}",
+        )
+        return {
+            "pass": True,
+            "score": 0,
+            "violations": [],
+            "rewrite_instruction": "",
+        }
+
+    audit.setdefault("pass", True)
+    audit.setdefault("score", 0)
+    audit.setdefault("violations", [])
+    audit.setdefault("rewrite_instruction", "")
+    return audit
+
+
+def _generate_batch_summary_with_audit(ws, llm, volume, batch_idx, start_ch, end_ch,
+                                       vol_outline, vol_worldview, previous_batch,
+                                       reference_batch, adapted_reference_batch,
+                                       rewrite_map, forbidden_terms):
+    forbidden_terms_text = (
+        "正式批次摘要阶段不使用静态禁用词表做判断。"
+        "请以新小说全书大纲、本卷卷纲、本卷世界观和换皮映射表为准，"
+        "确保参考批次只提供节奏和情节功能，不把旧世界因果写成当前新小说事实。"
+        "生成后会由 pro 模型进行剧情合理性审计。"
+    )
+    previous_result = ""
+    audit_feedback = ""
+    result = ""
+    audit = {"pass": True, "violations": [], "rewrite_instruction": ""}
+
+    for attempt in range(2):
+        prompt = PromptLoader.load(
+            "novel_batch_summary",
+            volume_outline=vol_outline,
+            volume_worldview=vol_worldview,
+            rewrite_map=rewrite_map,
+            forbidden_terms=forbidden_terms_text,
+            batch_index=batch_idx,
+            start_chapter=start_ch,
+            end_chapter=end_ch,
+            previous_batch=previous_batch,
+            adapted_reference_batch=adapted_reference_batch or "（无适配后的参考批次草稿）",
+            reference_batch=reference_batch or "（无参考批次数据）",
+            audit_feedback=audit_feedback,
+            previous_result=previous_result,
+        )
+        result = normalize_text(llm.generate(prompt))
+        audit = _audit_batch_summary_reasonability(
+            ws=ws,
+            llm=llm,
+            volume=volume,
+            batch_idx=batch_idx,
+            start_ch=start_ch,
+            end_ch=end_ch,
+            vol_outline=vol_outline,
+            vol_worldview=vol_worldview,
+            previous_batch=previous_batch,
+            reference_batch=reference_batch,
+            adapted_reference_batch=adapted_reference_batch,
+            rewrite_map=rewrite_map,
+            batch_summary=result,
+            attempt=attempt + 1,
+        )
+        if audit.get("pass"):
+            return result
+
+        violations = audit.get("violations") or []
+        issue_text = "；".join(
+            f"{item.get('type', 'unknown')}: {item.get('reason', item.get('text', ''))}"
+            if isinstance(item, dict) else str(item)
+            for item in violations
+        )
+        print(f"  新批次摘要剧情合理性审计未通过，尝试重写：{issue_text or '未给出具体原因'}")
+        previous_result = f"【上次生成结果】\n{result}"
+        rewrite_instruction = audit.get("rewrite_instruction") or "请根据审计意见修正世界观冲突、旧因果残留或阶段不合理问题。"
+        audit_feedback = (
+            f"【上次批次摘要剧情合理性审计未通过】\n"
+            f"审计问题：{issue_text or '未给出具体原因'}\n"
+            f"重写指令：{rewrite_instruction}\n"
+            "请保留参考节奏和情节功能，但必须让事件、人物、因果和阶段进展符合当前新小说大纲与世界观。"
+        )
+
+    if not audit.get("pass"):
+        append_adaptation_report(
+            ws,
+            f"卷{volume}批次{batch_idx}批次摘要合理性审计未通过",
+            f"审计结果：{audit}\n最后一次结果仍已返回供人工检查。",
+        )
+    return result
+
+
 
 
 
@@ -554,6 +933,7 @@ def gen_serial_chapter_outlines(ws, volume=1, force=False):
     llm = _get_llm()
     if not llm:
         return
+    _ensure_rewrite_map(ws, llm)
 
     # 参考卷映射
     outlines_dir = ws.reference_outlines
@@ -562,6 +942,9 @@ def gen_serial_chapter_outlines(ws, volume=1, force=False):
         print("错误：未找到参考小说卷数据。")
         return
     ref_vol = ref_volumes[min(volume - 1, len(ref_volumes) - 1)]
+    rewrite_map = load_rewrite_map(ws, volume)
+    forbidden_terms = load_forbidden_terms(ws, volume)
+    forbidden_terms_text = format_forbidden_terms(forbidden_terms)
 
     # ═══════════════════════════════════════════
     # Phase 1: 串行生成批次摘要
@@ -599,17 +982,35 @@ def gen_serial_chapter_outlines(ws, volume=1, force=False):
         )
 
         print(f"  生成批次{batch_idx}（第{start_ch}-{end_ch}章）...")
-        prompt = PromptLoader.load(
-            "novel_batch_summary",
-            volume_outline=vol_outline,
-            volume_worldview=vol_worldview,
-            batch_index=batch_idx,
-            start_chapter=start_ch,
-            end_chapter=end_ch,
-            previous_batch=prev_batch,
-            reference_batch=ref_batch or "（无参考批次数据）",
+        adapted_reference_batch = _adapt_reference_batch(
+            ws=ws,
+            llm=llm,
+            volume=volume,
+            batch_idx=batch_idx,
+            start_ch=start_ch,
+            end_ch=end_ch,
+            vol_outline=vol_outline,
+            vol_worldview=vol_worldview,
+            reference_batch=ref_batch or "",
+            rewrite_map=rewrite_map,
+            forbidden_terms=forbidden_terms,
+            force=force,
         )
-        result = normalize_text(llm.generate(prompt))
+        result = _generate_batch_summary_with_audit(
+            ws=ws,
+            llm=llm,
+            volume=volume,
+            batch_idx=batch_idx,
+            start_ch=start_ch,
+            end_ch=end_ch,
+            vol_outline=vol_outline,
+            vol_worldview=vol_worldview,
+            previous_batch=prev_batch,
+            reference_batch=ref_batch or "",
+            adapted_reference_batch=adapted_reference_batch,
+            rewrite_map=rewrite_map,
+            forbidden_terms=forbidden_terms,
+        )
         _write_file(batch_file, result)
         print(f"  -> 批次{batch_idx}已保存：{batch_file}")
 
@@ -664,6 +1065,8 @@ def gen_serial_chapter_outlines(ws, volume=1, force=False):
                 "serial_chapter_outline",
                 volume_outline=vol_outline,
                 volume_worldview=vol_worldview,
+                rewrite_map=rewrite_map,
+                forbidden_terms="章纲阶段不执行禁用词扫描。请以本卷卷纲、本卷世界观、换皮映射表和当前批次摘要为准，保持剧情合理性，不要主动引入与当前阶段不符的旧世界因果。",
                 batch_summary=batch_content,
                 previous_chapter_outlines=previous_text,
                 chapter_num=ch_num,
@@ -720,6 +1123,10 @@ def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
     llm = _get_llm()
     if not llm:
         return
+    _ensure_rewrite_map(ws, llm)
+    rewrite_map = load_rewrite_map(ws, volume)
+    forbidden_terms = load_forbidden_terms(ws, volume)
+    forbidden_terms_text = format_forbidden_terms(forbidden_terms)
 
     out_dir = os.path.join(ws.file_system, "chapters", f"vol_{volume:02d}")
     os.makedirs(out_dir, exist_ok=True)
@@ -781,18 +1188,40 @@ def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
         context = (
             f"=== 前序正文 ===\n{history_section}\n\n"
             f"=== 章纲（第{ch_num}章）===\n{chapter_outline}\n\n"
+            f"=== 换皮映射表 ===\n{rewrite_map}\n\n"
+            f"=== 禁止残留的参考元素 ===\n{forbidden_terms_text}\n\n"
             + (f"=== 参考小说本章正文 ===\n{ref_chapter_text}\n\n" if ref_chapter_text else "")
             + f"=== 写作规范 ===\n{writing_rules}"
         )
 
-        prompt = PromptLoader.load(
-            "adaptive_drafting",
-            context=context,
-            start_chapter=ch_num,
-            end_chapter=ch_num,
-            chapter_count=1,
-        )
-        result = normalize_text(llm.generate(prompt))
+        result = ""
+        violations = []
+        for attempt in range(2):
+            retry_context = context
+            if violations:
+                retry_context += (
+                    f"\n\n=== 上次生成违规项 ===\n"
+                    f"正文出现了以下禁止残留参考元素：{', '.join(violations)}。\n"
+                    "请保留本章章纲事件和情绪节点，改写或删除这些旧世界元素。"
+                )
+            prompt = PromptLoader.load(
+                "adaptive_drafting",
+                context=retry_context,
+                start_chapter=ch_num,
+                end_chapter=ch_num,
+                chapter_count=1,
+            )
+            result = normalize_text(llm.generate(prompt))
+            violations = scan_forbidden_terms(result, forbidden_terms)
+            if not violations:
+                break
+            print(f"  第{ch_num}章正文检测到参考元素残留：{', '.join(violations)}，尝试重写...")
+        if violations:
+            append_adaptation_report(
+                ws,
+                f"卷{volume}第{ch_num}章正文残留",
+                f"违规项：{', '.join(violations)}\n文件：{out_file}",
+            )
         _write_file(out_file, result)
         print(f"  -> 第{ch_num}章正文已保存：{out_file}")
 

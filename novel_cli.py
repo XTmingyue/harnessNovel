@@ -122,6 +122,26 @@ def cmd_novel_outline(args):
                       direction_file=args.direction_file)
 
 
+def cmd_world_import(args):
+    from training.adaptive_builder import import_target_world_sources
+    ws = _ws(args.workspace)
+    import_target_world_sources(ws, args.paths, force=args.force)
+
+
+def cmd_world_build(args):
+    from training.adaptive_builder import build_target_world_knowledge
+    ws = _ws(args.workspace)
+    build_target_world_knowledge(
+        ws,
+        force=args.force,
+        chunk_size=args.chunk_size,
+        chapter_batch_size=args.chapter_batch_size,
+        max_workers=args.max_workers,
+        primary_source=args.primary,
+        merge_only=args.merge_only,
+    )
+
+
 def cmd_novel_name_synopsis(args):
     from training.adaptive_builder import gen_novel_name_synopsis
     ws = _ws(args.workspace)
@@ -177,6 +197,22 @@ def main():
     p.add_argument("--direction", help="创作方向（字符串）")
     p.add_argument("--direction-file", help="创作方向文件路径")
 
+    # world-import
+    p = sub.add_parser("world-import", help="导入目标题材资料")
+    p.add_argument("workspace", help="工作区名称")
+    p.add_argument("paths", nargs="+", help="资料文件或目录路径，可传多个")
+    p.add_argument("--force", action="store_true", help="覆盖已导入的同源文件")
+
+    # world-build
+    p = sub.add_parser("world-build", help="结构化梳理目标题材资料")
+    p.add_argument("workspace", help="工作区名称")
+    p.add_argument("--force", action="store_true", help="强制重新结构化和汇总")
+    p.add_argument("--chunk-size", type=int, default=12000, help="资料分片字符数（默认12000）")
+    p.add_argument("--chapter-batch-size", type=int, default=20, help="章节资料每批章节数（默认20）")
+    p.add_argument("--max-workers", type=int, default=None, help="兼容参数：旧版分栏并行数，当前全栏目汇总模式通常无需设置")
+    p.add_argument("--primary", default=None, help="指定主资料，可填文件名、路径或资料ID；不指定时默认最大文件")
+    p.add_argument("--merge-only", action="store_true", help="只基于已有 worlds/<资料名>/*.md 重建 worlds/_final 和审计，跳过 cards/canon/source worlds")
+
     # novel-name-synopsis
     p = sub.add_parser("novel-name-synopsis", help="推荐书名与简介")
     p.add_argument("workspace", help="工作区名称")
@@ -211,6 +247,8 @@ def main():
     dispatch = {
         "list": cmd_list,
         "init": cmd_init,
+        "world-import": cmd_world_import,
+        "world-build": cmd_world_build,
         "novel-outline": cmd_novel_outline,
         "novel-name-synopsis": cmd_novel_name_synopsis,
         "volume-outline": cmd_volume_outline,

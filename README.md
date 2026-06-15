@@ -45,6 +45,19 @@
 
 不让 AI 凭空创作，而是让它先系统学习一部优秀小说的精华，再基于此进行有根基的创新创作。
 
+
+## 本次迭代
+
+本次迭代重点解决基于参考小说+灵感设计新世界观时出现的不合理的问题，主要体现在进行新世界观设计时缺少辅助的资料。
+比如参考小说为西游世界观，新世界为封神世界观，需要增加封神世界观相关资料，保证设计合理。
+
+新增能力：
+
+- `world-import`：可选，导入一个或多个目标题材资料文件/目录
+- `world-build`：可选，把导入资料结构化为分栏知识库，供后续大纲和世界观生成使用
+- `novel-outline`：若存在资料库，则根据参考小说 + 灵感生成初稿，再结合知识库做合理性校正。如果没有资料库，则直接基于参考小说 + 灵感生成大纲和世界观
+
+
 ## 核心功能
 
 **结构化拆书**
@@ -94,6 +107,8 @@
 
 - **全流程自动化**：从拆书分析到正文生成，5 条命令完成完整长篇小说
 - **参考仿写**：基于参考小说的节奏、结构、张力曲线生成新内容，而非凭空创作
+- **目标世界资料库（可选增强）**：支持导入目标题材资料/设定/样本网文，先结构化为知识库，再用于校验新书大纲和世界观；没有资料库时会自动降级为参考小说 + 用户方向流程
+- **换皮防污染**：生成换皮映射表，批次摘要、章纲、正文都会读取硬约束并进行禁用词审计
 - **批次摘要**：每 20 章一个批次，保持长线情节连贯性
 - **渐进式世界观**：全书世界观 → 每卷世界观，随情节推进细化设定
 - **断点续写**：所有阶段自动跳过已生成内容，支持中断后继续
@@ -147,20 +162,38 @@ ADAPTIVE_BUILDER_API_KEY=your-api-key
 ## 快速开始
 
 ```bash
-# 1. 初始化工作区（自动拆书：章节切分→批次摘要→智能分卷→世界观提取），自动在当前目录下创建my-novels目录
-novel init 我的新小说 --txt 参考小说.txt
+# 1. 初始化工作区（自动拆书：章节切分→批次摘要→智能分卷→参考世界观提取）
+novel init 我的新小说 --txt /path/to/参考小说.txt
 
-# 2. 生成新小说大纲 + 全书世界观
+# 2. 可选：导入资料，可导入多本，用于新小说世界观设计
+novel world-import 我的新小说 doc1.txt
+novel world-import 我的新小说 doc2.txt
+
+# 3. 可选：结构化目标世界知识库，--primary用于指定主资料
+novel world-build 我的新小说 --primary doc1.txt
+
+# 4. 生成新小说大纲 + 全书世界观
+#    有资料库时会先生成初稿，再基于目标世界知识库校正；无资料库时自动跳过校正
 novel novel-outline 我的新小说 --direction "灵感输入"
 
-# 3. 生成卷纲 + 每卷世界观
+# 5. 生成卷纲 + 每卷世界观
 novel volume-outline 我的新小说 --volume 1
 
-# 4. 生成批次摘要 + 逐章章纲
+# 6. 生成批次摘要 + 逐章章纲
+#    会先适配参考批次，再生成新批次摘要，并进行旧世界残留审计
 novel chapter-outlines 我的新小说 --volume 1
 
-# 5. 生成正文
-novel write 我的新小说 --volume 1
+# 7. 生成正文
+novel write 我的新小说 --volume 1 --start 1
+```
+
+已有工作区需要按新规则重建资料库或覆盖旧结果时，可使用：
+
+```bash
+novel world-build 我的新小说 --force --primary doc1.txt --chapter-batch-size 20
+novel novel-outline 我的新小说 --force --direction "灵感输入"
+novel volume-outline 我的新小说 --volume 1 --force
+novel chapter-outlines 我的新小说 --volume 1 --force
 ```
 
 ## 注意
@@ -175,6 +208,8 @@ novel write 我的新小说 --volume 1
 | `novel config`                                                        | 初始化全局配置文件          |
 | `novel list`                                                          | 列出所有工作区            |
 | `novel init <ws> --txt <path> [--batch-size N]`                       | 创建工作区，自动拆书 + 世界观提取 |
+| `novel world-import <ws> <paths...> [--force]`                        | 导入目标题材资料文件或目录      |
+| `novel world-build <ws> [--force] [--merge-only] [--primary NAME] [--chapter-batch-size N] [--chunk-size N] [--max-workers N]` | 将目标题材资料结构化为分栏知识库 |
 | `novel novel-outline <ws> [--direction TEXT] [--direction-file PATH]` | 生成新小说大纲和全书世界观      |
 | `novel volume-outline <ws> [--volume N] [--force]`                    | 生成卷纲和每卷世界观         |
 | `novel chapter-outlines <ws> [--volume N] [--force]`                  | 两阶段生成：批次摘要 → 逐章章纲  |
@@ -186,6 +221,11 @@ novel write 我的新小说 --volume 1
 - `--batch-size N`：每批处理章节数，默认 20（仅 init）
 - `--direction TEXT`：创作方向，如"改为现代都市背景"（仅 novel-outline）
 - `--direction-file PATH`：从文件读取创作方向（仅 novel-outline）
+- `--chapter-batch-size N`：章节资料每批章节数，默认 20；识别不到章节时才使用字符分片（仅 world-build）
+- `--chunk-size N`：目标题材资料分片字符数，默认 12000（仅 world-build）
+- `--max-workers N`：兼容旧版参数；当前 world-build 使用全栏目汇总，通常无需设置
+- `--primary NAME`：指定 world-build 主资料，可填文件名、路径或资料 ID；不指定时默认最大文件
+- `--merge-only`：只基于已有 `worlds/<资料名>/*.md` 重建 `worlds/_final/` 和审计，不重新提取 cards
 - `--volume N`：指定卷号，默认 1
 - `--start N`：起始章节号，默认 1（仅 write）
 - `--max N`：最大生成章节数（仅 write）
