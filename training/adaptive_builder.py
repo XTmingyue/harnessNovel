@@ -1853,7 +1853,44 @@ def gen_serial_chapter_outlines(ws, volume=1, force=False):
     print(f"\n>>> 卷{volume}全部 {total_chapters} 章章纲已生成。<<<")
 
 
-def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
+def _raw_chapter_backup_path(ws, volume, chapter_num):
+    raw_dir = os.path.join(ws.file_system, "drafts", f"vol_{volume:02d}", "raw_chapters")
+    return os.path.join(raw_dir, f"{chapter_num:03d}_第{chapter_num}章.raw.md")
+
+
+def _backup_raw_chapter(ws, volume, chapter_num, content):
+    """保存去AI味前的原稿；已存在时保留第一次备份。"""
+    backup_path = _raw_chapter_backup_path(ws, volume, chapter_num)
+    if os.path.exists(backup_path):
+        return backup_path
+    _write_file(backup_path, content)
+    return backup_path
+
+
+def _humanize_chapter_text(
+    llm,
+    ws,
+    volume,
+    chapter_num,
+    chapter_text,
+):
+    _backup_raw_chapter(ws, volume, chapter_num, chapter_text)
+    prompt = PromptLoader.load(
+        "humanize_chapter",
+        chapter_text=chapter_text,
+    )
+    result = normalize_text(llm.generate(prompt))
+    return result or chapter_text
+
+
+def gen_serial_chapters(
+    ws,
+    volume=1,
+    start_chapter=1,
+    max_chapters=None,
+    humanize=True,
+    humanize_existing=False,
+):
     """串行生成正文：以当前舞台+故事情节单元+本章章纲+前2章正文+写作文风为输入生成下一章正文。"""
     # 项目根目录
     _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1867,6 +1904,21 @@ def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
     style_guide = _read_file(os.path.join(_root, "core", "system_prompt.md")) or ""
     agents_md = _read_file(os.path.join(_root, "core", "agents.md")) or ""
     writing_rules = f"{style_guide}\n\n{agents_md}" if style_guide or agents_md else "（无写作文风规范）"
+    hard_style_rules = (
+        "=== 本轮正文硬性风格约束（最终优先）===\n"
+        "1. 不使用二分对比套式：例如“不是A，而是B”“不是X，也不是Y，是Z”。\n"
+        "2. 不使用否定递进套式：例如“不仅是A，更是B”“不只是A，更是B”。\n"
+        "3. 不使用破折号。需要停顿时用逗号、句号或直接拆句。\n"
+        "4. 如果参考小说、章纲、前序正文或写作规范示例中出现上述写法，只能视为反例，不能照搬。\n"
+    )
+    writing_rules = f"{writing_rules}\n\n{hard_style_rules}"
+    print(
+        "  -> 已加载写作规范："
+        f"core/system_prompt.md {len(style_guide)} 字；"
+        f"core/agents.md {len(agents_md)} 字。"
+    )
+    if not style_guide and not agents_md:
+        print("     警告：未加载到写作规范，正文生成将缺少风格约束。")
 
     # 扫描章纲
     outlines_dir = os.path.join(ws.file_system, "chapter_outlines", f"vol_{volume:02d}")
@@ -1902,25 +1954,60 @@ def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
     out_dir = os.path.join(ws.file_system, "chapters", f"vol_{volume:02d}")
     os.makedirs(out_dir, exist_ok=True)
 
-    # 确定待生成章节
-    pending = []
+    # 确定待处理章节
+    tasks = []
     for ch_num in range(start_chapter, total_chapters + 1):
         out_file = os.path.join(out_dir, f"{ch_num:03d}_第{ch_num}章.md")
         if os.path.exists(out_file):
-            print(f"  第{ch_num}章正文已存在，跳过。")
+            if humanize and humanize_existing:
+                tasks.append(("humanize_existing", ch_num))
+            else:
+                print(f"  第{ch_num}章正文已存在，跳过。")
+            if max_chapters and len(tasks) >= max_chapters:
+                break
             continue
-        pending.append(ch_num)
-        if max_chapters and len(pending) >= max_chapters:
+        tasks.append(("generate", ch_num))
+        if max_chapters and len(tasks) >= max_chapters:
             break
 
-    if not pending:
+    if not tasks:
         print("[Orchestrator] 没有待生成的章节（全部已存在）。")
+        if humanize and not humanize_existing:
+            print("  如需对已有正文执行去AI味，可使用 --humanize-existing。")
         return
 
-    print(f"  待生成：{len(pending)} 章（第 {pending[0]}-{pending[-1]} 章）")
+    generate_count = sum(1 for mode, _ in tasks if mode == "generate")
+    existing_count = len(tasks) - generate_count
+    range_text = f"第 {tasks[0][1]}-{tasks[-1][1]} 章"
+    if existing_count:
+        print(f"  待处理：{len(tasks)} 章（{range_text}；新生成 {generate_count}，已有正文去AI味 {existing_count}）")
+    else:
+        print(f"  待生成：{generate_count} 章（{range_text}）")
 
-    for idx, ch_num in enumerate(pending):
+    for idx, (task_mode, ch_num) in enumerate(tasks):
         out_file = os.path.join(out_dir, f"{ch_num:03d}_第{ch_num}章.md")
+
+        if task_mode == "generate":
+            print(f"\n--- 撰写第{ch_num}章（{idx + 1}/{len(tasks)}）---")
+        else:
+            print(f"\n--- 去AI味第{ch_num}章（{idx + 1}/{len(tasks)}）---")
+
+        if task_mode == "humanize_existing":
+            existing_text = _read_file(out_file)
+            if not existing_text:
+                print(f"  警告：第{ch_num}章正文为空，跳过。")
+                continue
+            result = _humanize_chapter_text(
+                llm,
+                ws,
+                volume,
+                ch_num,
+                existing_text,
+            )
+            _write_file(out_file, result)
+            print(f"  -> 第{ch_num}章正文已去AI味并保存：{out_file}")
+            print(f"     原稿备份：{_raw_chapter_backup_path(ws, volume, ch_num)}")
+            continue
 
         # 读取本章章纲
         chapter_outline = _read_file(os.path.join(outlines_dir, f"chapter_{ch_num:03d}.md"))
@@ -1928,8 +2015,6 @@ def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
             print(f"  警告：第{ch_num}章章纲文件不存在，跳过。")
             continue
         chapter_outline = re.sub(r'\n?\[(?:FINISHED|CONTINUE)\]\s*$', '', chapter_outline).strip()
-
-        print(f"\n--- 撰写第{ch_num}章（{idx + 1}/{len(pending)}）---")
 
         # 读取前2章正文（不截断）
         prev_texts = []
@@ -1969,10 +2054,23 @@ def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
             chapter_count=1,
         )
         result = normalize_text(llm.generate(prompt))
+        if humanize:
+            print(f"  第{ch_num}章正文去AI味处理中...")
+            result = _humanize_chapter_text(
+                llm,
+                ws,
+                volume,
+                ch_num,
+                result,
+            )
         _write_file(out_file, result)
-        print(f"  -> 第{ch_num}章正文已保存：{out_file}")
+        if humanize:
+            print(f"  -> 第{ch_num}章正文已保存：{out_file}")
+            print(f"     原稿备份：{_raw_chapter_backup_path(ws, volume, ch_num)}")
+        else:
+            print(f"  -> 第{ch_num}章正文已保存：{out_file}")
 
-    print(f"\n  -> 卷{volume}正文生成完毕（共 {len(pending)} 章）。")
+    print(f"\n  -> 卷{volume}正文处理完毕（共 {len(tasks)} 章）。")
 
 
 def gen_worldview(ws):

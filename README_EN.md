@@ -45,13 +45,16 @@ Instead of asking AI to create from nothing, harnessNovel first lets it systemat
 
 ## Current Iteration
 
-This iteration changes the imitation flow from “traditional full-book outline + volume outline + batch summary” to “core gameplay + long/short lines + stages + story-arc units”. The goal is to reduce direct reskin similarity, make long web novels easier to adjust while writing, and provide stable numeric/state constraints for system novels.
+This iteration changes the imitation flow from “traditional full-book outline + volume outline + batch summary” to “core gameplay + long/short lines + stages + story-arc units”.
+
+The goal is to reduce direct reskin similarity, make long web novels easier to adjust while writing, and provide stable numeric/state constraints for system novels.
 
 Key changes:
 
 - **Core gameplay and long/short lines replace the old outline-centered design**: `novel-outline` no longer treats a one-shot full-book outline as the central asset. It first designs core gameplay, then generates the long-running mainline, stage roadmap, and character arcs. The long line maintains suspense and expectation; stage-level short lines create local payoffs, conflicts, and emotional beats.
 - **Stage-driven story-arc units**: Each stage in `stage_roadmap.md` replaces the role of the old volume outline. `story-arcs` abstracts narrative patterns from reference story arcs, then regenerates new story arcs against the current stage instead of renaming reference plots.
 - **Mechanics layer for system novels**: `mechanics-init` adds an optional mechanics layer. System novels, game novels, lord-management novels, and infinite-flow novels can use structured rules and state to constrain panels, exp, skills, tasks, resources, and other numeric/state elements instead of relying fully on the model for calculation.
+- **Chapter humanization post-processing**: `write` now runs a humanization pass after each generated chapter by default. The rules are sourced from [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh) to reduce formulaic structures, summary tone, promotional tone, and mechanical emotion labels.
 - **Target-world knowledge remains optional**: `world-import` / `world-build` can import target-genre materials to calibrate the plausibility of core gameplay, stage roadmap, and character arcs. Without a knowledge base, the flow falls back to reference novel + user direction.
 
 ## Core Features
@@ -114,6 +117,7 @@ Supports Claude, GPT-4o, DeepSeek, Qwen, and other mainstream models.
 - **Narrative-pattern imitation**: During imitation, the current-volume gameplay/stage context is compressed first; reference story arcs are then abstracted into narrative patterns and regenerated as new-novel story arcs to reduce hard reskin similarity.
 - **Stage-based progression**: Design the full-book stages first, then generate story arcs and chapter outlines for the current stage. This fits long web novels that evolve during writing.
 - **Mechanics layer**: System novels, game novels, lord-management novels, and similar genres can initialize structured mechanics to constrain panels, exp, skills, tasks, resources, and state changes.
+- **Chapter humanization**: Based on [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh), newly generated chapters are refined by default and raw drafts are backed up.
 - **Resume from breakpoint**: Every stage automatically skips existing output and supports continuing after interruption.
 
 ## Requirements
@@ -179,7 +183,7 @@ novel story-arcs my-new-novel --volume 1
 # 4. Generate chapter outlines from the story arcs.
 novel chapter-outlines my-new-novel --volume 1
 
-# 5. Generate full text
+# 5. Generate full text. By default, each generated chapter is humanized afterward.
 novel write my-new-novel --volume 1 --start 1
 ```
 
@@ -187,28 +191,42 @@ novel write my-new-novel --volume 1 --start 1
 
 `novel story-arcs my-new-novel --volume 1` converts the narrative experience extracted from the reference novel into executable plot blueprints for the current stage of the new novel.
 
-The current flow no longer generates a traditional volume outline and then imitates coarse batch summaries. Each stage in `stage_roadmap.md` is the basic generation unit. A stage defines the current space, rules, enemies, resources, character nodes, long-line progress, and local short lines. `story-arcs` reads the current volume/stage and compresses it into a reusable `arc_context`.
+The current flow no longer generates a traditional volume outline and then imitates coarse batch summaries. Each stage in `stage_roadmap.md` is the basic generation unit:
 
-At this stage, the reference novel does not provide plots to rename. It provides narrative patterns to learn from. The system selects one reference story arc by default as the narrative sample, abstracts its plot function, conflict structure, information gap, emotion curve, payoff mechanism, key turn, and ending hook, then regenerates a new story-arc unit against the current stage.
+- It defines the current space, rules, enemies, resources, character nodes, long-line progress, and local short lines.
+- `story-arcs` reads the current volume/stage and compresses it into a reusable `arc_context`.
 
-Therefore, a log message such as “narrative sample: reference chapter X-Y” means the source used for narrative-pattern extraction. It does not mean a one-to-one chapter mapping, and it does not mean the new novel should inherit the reference novel’s concrete characters, places, events, or causality.
+At this stage, the reference novel does not provide plots to rename. It provides narrative patterns to learn from.
 
-Core assets:
+The system selects one reference story arc by default as the narrative sample, abstracts its plot function, conflict structure, information gap, emotion curve, payoff mechanism, key turn, and ending hook, then regenerates a new story-arc unit against the current stage.
 
-- `file_system/adaptation/arc_contexts/vol_xx_context.md`
-  Compressed current-stage context: gameplay, mainline, stage rules, character lines, mechanics boundaries, and related constraints.
-- `file_system/adaptation/story_patterns/vol_xx/arc_xxx_chAAA_BBB.md`
-  Narrative pattern abstracted from the reference story arc.
-- `file_system/story_arcs/vol_xx/arc_xxx_chAAA_BBB.md`
-  Final new story-arc unit used as the plot blueprint for chapter outlines.
-- `file_system/story_arcs/vol_xx/arcs_index.json`
-  Story-arc index recording the chapter range covered by each unit.
+## Chapter Humanization Post-processing
 
-The `story-arcs` stage does not read reference chapter prose. Reference prose is read later by `write` only as a writing-technique sample.
+`novel write` adds a humanization refinement step. The rules are sourced from [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh).
+
+Core principles include: removing filler phrases, breaking formulaic structures, varying sentence rhythm, trusting the reader, and removing quote-like slogans. For web-novel output, it also protects plot events, payoff beats, ending hooks, and mechanics numbers from being changed.
+
+After AI-flavor removal, Zhuque AI detection can ensure that an average of **80%+** content is judged as suspected AI.
+
+- The refined result is written to the final chapter directory: `file_system/chapters/vol_xx/`.
+- The raw draft is backed up under `file_system/drafts/vol_xx/raw_chapters/`.
+
+```bash
+# Default: generate and humanize each new chapter.
+novel write my-new-novel --volume 1 --start 1
+
+# Disable humanization and keep the raw draft.
+novel write my-new-novel --volume 1 --start 1 --no-humanize
+
+# Humanize existing chapter files.
+novel write my-new-novel --volume 1 --start 1 --max 3 --humanize-existing
+```
 
 ## Optional: Mechanics Layer
 
-If the new novel is a system novel, game novel, lord-management novel, infinite-flow novel, or needs stable tracking for realms, resources, skills, tasks, or relationship state, initialize the optional mechanics layer. Non-system novels can leave it disabled.
+If the new novel is a system novel, game novel, lord-management novel, infinite-flow novel, or needs stable tracking for realms, resources, skills, tasks, or relationship state, initialize the optional mechanics layer.
+
+**Non-system novels can disable it; later workflow stages will ignore it automatically.**
 
 ```bash
 # Automatically decide whether mechanics are needed: none / light_state / explicit_mechanics
@@ -283,6 +301,9 @@ novel story-arcs my-new-novel --volume 1 --force
 
 # Overwrite chapter outlines for a volume/stage.
 novel chapter-outlines my-new-novel --volume 1 --force
+
+# Humanize existing chapter files.
+novel write my-new-novel --volume 1 --start 1 --max 3 --humanize-existing
 ```
 
 ## Notes
@@ -305,7 +326,7 @@ novel chapter-outlines my-new-novel --volume 1 --force
 | `novel volume-outline <ws> [--volume N] [--force]`                    | Legacy flow: generate volume outline, per-volume worldview, and per-volume stage plan |
 | `novel story-arcs <ws> [--volume N] [--force]`                        | Generate story arcs and narrative patterns for a volume/stage |
 | `novel chapter-outlines <ws> [--volume N] [--force]`                  | Generate chapter outlines from story arcs |
-| `novel write <ws> [--volume N] [--start N] [--max N]`                 | Generate full text serially                      |
+| `novel write <ws> [--volume N] [--start N] [--max N] [--no-humanize] [--humanize-existing]` | Generate full text serially and humanize each new chapter by default |
 
 ### Parameters
 
@@ -325,6 +346,8 @@ novel chapter-outlines my-new-novel --volume 1 --force
 - `--after-stage N` / `--before-stage N`: Relative insertion position for a new stage. Used only by `stage-insert`.
 - `--start N`: Starting chapter number. Default: 1. Used only by `write`.
 - `--max N`: Maximum number of chapters to generate. Used only by `write`.
+- `--no-humanize`: Disable automatic humanization after chapter generation. Used only by `write`.
+- `--humanize-existing`: Humanize existing chapter files. By default, only newly generated chapters are humanized. Used only by `write`.
 - `--force`: Force regeneration and overwrite existing content.
 
 ## About the Author

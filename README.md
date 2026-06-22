@@ -48,13 +48,16 @@
 
 ## 本次迭代
 
-本次迭代把仿写流程从“传统全书大纲 + 分卷卷纲 + 批次摘要”调整为“核心玩法 + 长短线 + 舞台 + 故事情节单元”。目标是降低直接换皮相似度，让长篇网文更适合边写边调整，同时为系统文提供稳定的数值/状态约束。
+本次迭代把仿写流程从“传统全书大纲 + 分卷卷纲 + 批次摘要”调整为“核心玩法 + 长短线 + 舞台 + 故事情节单元”。
+
+目标是降低直接换皮相似度，让长篇网文更适合边写边调整，同时为系统文提供稳定的数值/状态约束。
 
 核心变化：
 
 - **核心玩法与长短线替代原先的大纲设计**：`novel-outline` 不再以一次性全书大纲为核心资产，而是先设计核心玩法，再生成全书长线主线、舞台路线图和角色成长线。长线负责持续悬念和期待，舞台内短线负责阶段性爽点、冲突和情绪刺激。
 - **舞台驱动故事情节单元**：`stage_roadmap.md` 中的每个舞台承担原先“分卷卷纲”的作用。`story-arcs` 会基于当前舞台，从参考小说故事情节中抽象叙事模式，再生成新书自己的故事情节单元，而不是把参考剧情简单换名。
 - **系统文机制层**：新增 `mechanics-init`。系统文、游戏文、领主文、无限流等可初始化机制层，用结构化规则和状态约束系统面板、经验值、技能、任务、资源等内容，避免完全依赖大模型做数字计算。
+- **正文去AI味后处理**：`write` 默认在每章正文生成后增加一层精修，规则来源于 [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh)，用于降低公式化句式、总结腔、宣传腔和机械情绪描写。
 - **目标世界资料库仍作为可选增强**：`world-import` / `world-build` 可导入目标题材资料，供核心玩法、舞台路线和角色线校正目标世界合理性；没有资料库时流程自动降级为参考小说 + 用户方向。
 
 
@@ -117,6 +120,7 @@
 - **叙事模式仿写**：仿写阶段先压缩当前卷玩法/舞台上下文，再把参考故事情节抽象为叙事模式，生成新书自己的故事情节单元，降低硬换皮相似度
 - **舞台式推进**：先设计全书舞台，再按当前舞台生成故事情节单元与章纲，适合长篇网文边写边迭代
 - **机制层**：系统文、游戏文、领主文等可初始化机制层，把面板、经验、技能、任务、资源和状态变化交给结构化规则约束
+- **正文去AI味**：基于 [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh) 增加章节级后处理，默认对新生成正文执行语言精修，并保留原稿备份
 - **断点续写**：所有阶段自动跳过已生成内容，支持中断后继续
 
 ## 环境要求
@@ -181,7 +185,7 @@ novel story-arcs 我的新小说 --volume 1
 # 4. 基于故事情节单元生成逐章章纲
 novel chapter-outlines 我的新小说 --volume 1
 
-# 5. 生成正文
+# 5. 生成正文；默认会在每章生成后执行去AI味精修
 novel write 我的新小说 --volume 1 --start 1
 ```
 
@@ -189,28 +193,42 @@ novel write 我的新小说 --volume 1 --start 1
 
 `novel story-arcs 我的新小说 --volume 1` 的作用是把“参考小说提供的叙事经验”转化成“当前新书舞台下可执行的剧情蓝图”。
 
-当前流程不再先生成传统分卷卷纲，再按批次摘要仿写。`stage_roadmap.md` 中的每个舞台就是后续生成的基本单位：它定义当前阶段的空间、规则、敌人、资源、角色节点、长线推进和舞台内短线。`story-arcs` 会读取当前卷/舞台，并把它压缩成可复用的 `arc_context`。
+当前流程不再先生成传统分卷卷纲，再按批次摘要仿写。`stage_roadmap.md` 中的每个舞台就是后续生成的基本单位：
 
-参考小说在这一阶段的作用不是提供可替换的剧情，而是提供可学习的叙事模式。系统会默认选取一个参考故事情节作为叙事样本，抽象出情节功能、冲突结构、信息差、情绪曲线、爽点机制、关键转折和章末钩子，再结合当前舞台重新生成新书的故事情节单元。
+- 它定义当前阶段的空间、规则、敌人、资源、角色节点、长线推进和舞台内短线
+- `story-arcs` 会读取当前卷/舞台，并把它压缩成可复用的 `arc_context`
 
-因此日志里的“叙事样本：参考第X-Y章”表示叙事模式来源，不表示新书章节和参考章节一一对应，也不表示要继承参考小说的具体人物、地点、事件和因果。
+参考小说在这一阶段的作用不是提供可替换的剧情，而是提供可学习的叙事模式。
 
-核心资产：
+系统会默认选取一个参考故事情节作为叙事样本，抽象出情节功能、冲突结构、信息差、情绪曲线、爽点机制、关键转折和章末钩子，再结合当前舞台重新生成新书的故事情节单元。
 
-- `file_system/adaptation/arc_contexts/vol_xx_context.md`
-  当前舞台的压缩上下文，包含玩法、长线、舞台规则、角色线、机制层边界等。
-- `file_system/adaptation/story_patterns/vol_xx/arc_xxx_chAAA_BBB.md`
-  从参考故事情节抽象出的叙事模式。
-- `file_system/story_arcs/vol_xx/arc_xxx_chAAA_BBB.md`
-  新书正式故事情节单元，作为逐章章纲的剧情蓝图。
-- `file_system/story_arcs/vol_xx/arcs_index.json`
-  故事情节索引，记录每个情节单元覆盖的章节范围。
+## 正文去AI味后处理
 
-`story-arcs` 阶段不会读取参考小说正文。参考正文只在后续 `write` 正文生成阶段作为写法样本读取。
+`novel write` 新增去AI味精修，该步骤规则来源于 [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh)
+
+核心原则包括：删除填充短语、打破公式结构、变化句子节奏、信任读者、删除金句，并针对网文场景额外约束剧情、爽点、章末钩子和机制数值不得被改动。
+
+去除AI味后正文经朱雀AI检测，可保证平均 **80%+** 内容判定为疑似 AI。
+
+- 精修结果写入正式章节文件 `file_system/chapters/vol_xx/`
+- 原稿会备份到 `file_system/drafts/vol_xx/raw_chapters/`
+
+```bash
+# 默认开启：生成正文后自动去AI味
+novel write 我的新小说 --volume 1 --start 1
+
+# 关闭去AI味，直接保存原始正文
+novel write 我的新小说 --volume 1 --start 1 --no-humanize
+
+# 对已经存在的正文重新执行去AI味
+novel write 我的新小说 --volume 1 --start 1 --max 3 --humanize-existing
+```
 
 ## 可选：机制层 mechanics
 
-如果新书是系统文、游戏文、领主文、无限流，或需要稳定追踪境界、资源、技能、任务、关系状态，可以初始化机制层。非系统文可以关闭，后续流程会自动忽略。
+如果新书是系统文、游戏文、领主文、无限流，或需要稳定追踪境界、资源、技能、任务、关系状态，可以初始化机制层。
+
+**非系统文可以关闭，后续流程会自动忽略。**
 
 ```bash
 # 自动判断是否需要机制层：none / light_state / explicit_mechanics
@@ -285,6 +303,9 @@ novel story-arcs 我的新小说 --volume 1 --force
 
 # 覆盖指定卷/舞台的章纲
 novel chapter-outlines 我的新小说 --volume 1 --force
+
+# 对已有正文执行去AI味
+novel write 我的新小说 --volume 1 --start 1 --max 3 --humanize-existing
 ```
 
 ## 注意
@@ -308,7 +329,7 @@ novel chapter-outlines 我的新小说 --volume 1 --force
 | `novel volume-outline <ws> [--volume N] [--force]`                    | 旧流程兼容：生成卷纲、每卷世界观和每卷舞台计划 |
 | `novel story-arcs <ws> [--volume N] [--force]`                        | 按卷/舞台生成故事情节单元和叙事模式 |
 | `novel chapter-outlines <ws> [--volume N] [--force]`                  | 基于故事情节单元生成逐章章纲      |
-| `novel write <ws> [--volume N] [--start N] [--max N]`                 | 串行生成正文             |
+| `novel write <ws> [--volume N] [--start N] [--max N] [--no-humanize] [--humanize-existing]` | 串行生成正文，默认生成后执行去AI味 |
 
 ### 参数说明
 
@@ -328,6 +349,8 @@ novel chapter-outlines 我的新小说 --volume 1 --force
 - `--after-stage N` / `--before-stage N`：插入新舞台时指定相对位置（仅 stage-insert）
 - `--start N`：起始章节号，默认 1（仅 write）
 - `--max N`：最大生成章节数（仅 write）
+- `--no-humanize`：关闭正文生成后的自动去AI味后处理（仅 write）
+- `--humanize-existing`：对已存在正文执行去AI味；默认只处理本次新生成章节（仅 write）
 - `--force`：强制重新生成，覆盖已有内容
 
 

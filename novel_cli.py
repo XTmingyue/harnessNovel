@@ -22,7 +22,7 @@ def cmd_config(args):
   DATA_BUILDER_BASE_URL=https://api.deepseek.com
   DATA_BUILDER_API_KEY=your-api-key
 
-  # 仿写核心任务：大纲、卷纲、章纲、正文（建议 pro 模型）
+  # 仿写核心任务：玩法、舞台、情节单元、章纲、正文、去AI味精修（建议 pro 模型）
   ADAPTIVE_BUILDER_MODEL=deepseek-chat
   ADAPTIVE_BUILDER_BASE_URL=https://api.deepseek.com
   ADAPTIVE_BUILDER_API_KEY=your-api-key
@@ -226,7 +226,9 @@ def cmd_write(args):
         return
     ws = _ws(args.workspace)
     gen_serial_chapters(ws, volume=volume, start_chapter=args.start,
-                        max_chapters=args.max)
+                        max_chapters=args.max,
+                        humanize=not args.no_humanize,
+                        humanize_existing=args.humanize_existing)
 
 
 # ── 主入口 ──────────────────────────────────────────────
@@ -331,6 +333,8 @@ def main():
     p.add_argument("--stage", type=int, default=None, help="兼容旧别名：等同于 --volume，不表示卷内 stage")
     p.add_argument("--start", type=int, default=1, help="起始章节号")
     p.add_argument("--max", type=int, default=None, help="最大章节数")
+    p.add_argument("--no-humanize", action="store_true", help="关闭正文生成后的自动去AI味后处理")
+    p.add_argument("--humanize-existing", action="store_true", help="对已存在的正文执行去AI味；默认只处理本次新生成章节")
 
     args = parser.parse_args()
 
