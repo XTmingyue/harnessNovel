@@ -23,6 +23,11 @@ VOLUME_TITLE_RE = re.compile(r'^[ \t　]*第[一二三四五六七八九十百�
 
 # 卷目录名格式：vol_01_卷名
 VOL_DIR_RE = re.compile(r'^vol_(\d+)_(.+)$')
+ARC_FILE_RE = re.compile(r'^arc_(\d+)_ch(\d+)_(\d+)\.md$')
+ARC_HEADER_RE = re.compile(
+    r'^【情节(?:\d+)?[：:]\s*第(\d+)-(\d+)章(?:[｜|：:](.*?))?】',
+    re.MULTILINE,
+)
 
 
 def _read_and_clean(txt_path):
@@ -262,6 +267,14 @@ def _batch_file_name(batch_start, batch_end):
     return f"batch_{batch_start + 1:03d}_{batch_end:03d}.md"
 
 
+def _arc_dir(vol_dir):
+    return os.path.join(vol_dir, "story_arcs")
+
+
+def _arc_file_name(arc_idx, start_ch, end_ch):
+    return f"arc_{arc_idx:03d}_ch{start_ch:03d}_{end_ch:03d}.md"
+
+
 def _read_file(path):
     if not os.path.exists(path):
         return None
@@ -276,83 +289,226 @@ def _write_file(path, content):
         f.write(content + "\n")
 
 
-def extract_volume_outline(vol_idx, volume_title, chapters, llm, outlines_dir, batch_size=20):
-    """提取单卷卷纲。每批结果立即存盘，支持断点续传。"""
-    vol_dir = os.path.join(outlines_dir, _vol_dir_name(vol_idx, volume_title))
-    total = len(chapters)
-    print(f"    [{volume_title}] 共 {total} 章")
+def _format_chapters_for_arc_window(chapters, start_idx, end_idx):
+    parts = []
+    for i in range(start_idx, end_idx):
+        ch_num = i + 1
+        parts.append(f"=== 第{ch_num}章 ===\n{chapters[i]['content']}")
+    return "\n\n".join(parts)
 
-    # 1. 分批提取子纲，每批存盘
-    batch_files = []
-    for batch_start in range(0, total, batch_size):
-        batch_end = min(batch_start + batch_size, total)
-        batch = chapters[batch_start:batch_end]
-        bfile = os.path.join(vol_dir, _batch_file_name(batch_start, batch_end))
 
-        # 断点续传：已有文件则跳过
-        existing = _read_file(bfile)
-        if existing:
-            print(f"    -> 第 {batch_start+1}-{batch_end} 章子纲已存在，跳过。")
-            batch_files.append(bfile)
+def _parse_story_arc_result(result):
+    """解析 story_arc_extract 输出，返回 completed arcs 和 carryover。"""
+    if not result:
+        return [], ""
+
+    carryover = ""
+    carry_match = re.search(r'^# 未闭合情节续接区\s*$', result, re.MULTILINE)
+    arc_part = result
+    if carry_match:
+        arc_part = result[:carry_match.start()]
+        carryover = result[carry_match.end():].strip()
+        if carryover in {"无", "无。", "（无）"}:
+            carryover = ""
+
+    matches = list(ARC_HEADER_RE.finditer(arc_part))
+    arcs = []
+    for idx, match in enumerate(matches):
+        start = match.start()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(arc_part)
+        text = arc_part[start:end].strip()
+        if not text:
             continue
+        title = (match.group(3) or "").strip()
+        arcs.append({
+            "start_ch": int(match.group(1)),
+            "end_ch": int(match.group(2)),
+            "title": title,
+            "content": text,
+        })
+    return arcs, carryover
 
-        print(f"    -> 提取子纲（第 {batch_start+1}-{batch_end} 章，共 {len(batch)} 章）...")
-        chapters_text = "\n\n".join(ch["content"] for ch in batch)
+
+def _story_arc_files(vol_dir):
+    arc_path = _arc_dir(vol_dir)
+    if not os.path.isdir(arc_path):
+        return []
+    items = []
+    for fname in sorted(os.listdir(arc_path)):
+        m = ARC_FILE_RE.match(fname)
+        if not m:
+            continue
+        items.append({
+            "idx": int(m.group(1)),
+            "start_ch": int(m.group(2)),
+            "end_ch": int(m.group(3)),
+            "file": fname,
+            "path": os.path.join(arc_path, fname),
+        })
+    return items
+
+
+def _load_story_arc_texts(vol_dir):
+    texts = []
+    for item in _story_arc_files(vol_dir):
+        content = _read_file(item["path"])
+        if content:
+            copied = dict(item)
+            copied["content"] = content
+            texts.append(copied)
+    return texts
+
+
+def _write_story_arc_index(vol_dir, arc_items):
+    index_path = os.path.join(_arc_dir(vol_dir), "arcs_index.json")
+    payload = []
+    for item in arc_items:
+        payload.append({
+            "id": item["idx"],
+            "start_ch": item["start_ch"],
+            "end_ch": item["end_ch"],
+            "file": item["file"],
+        })
+    os.makedirs(os.path.dirname(index_path), exist_ok=True)
+    with open(index_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def _extract_story_arcs_for_volume(vol_idx, volume_title, chapters, llm, outlines_dir, batch_size=20):
+    """按读取窗口提取自然故事情节单元，支持跨窗口 carryover。"""
+    vol_dir = os.path.join(outlines_dir, _vol_dir_name(vol_idx, volume_title))
+    arc_path = _arc_dir(vol_dir)
+    existing_arcs = _load_story_arc_texts(vol_dir)
+    if existing_arcs:
+        print(f"    -> 已存在 {len(existing_arcs)} 个故事情节单元，跳过提取。")
+        return existing_arcs
+
+    total = len(chapters)
+    carryover = ""
+    arc_items = []
+    arc_idx = 1
+    last_result = ""
+    os.makedirs(arc_path, exist_ok=True)
+
+    for start_idx in range(0, total, batch_size):
+        end_idx = min(start_idx + batch_size, total)
+        start_ch = start_idx + 1
+        end_ch = end_idx
+        is_final_window = "是" if end_idx >= total else "否"
+        print(f"    -> 识别故事情节（第 {start_ch}-{end_ch} 章，读取窗口 {batch_size} 章）...")
+
         prompt = PromptLoader.load(
-            "batch_extract",
-            start_chapter=batch_start + 1,
-            end_chapter=batch_end,
-            chapters_text=chapters_text
+            "story_arc_extract",
+            previous_carryover=carryover or "无",
+            start_chapter=start_ch,
+            end_chapter=end_ch,
+            is_final_window=is_final_window,
+            chapters_text=_format_chapters_for_arc_window(chapters, start_idx, end_idx),
         )
         result = normalize_text(llm.generate(prompt))
-        _write_file(bfile, result)
-        print(f"    -> 子纲已保存：{bfile}")
-        batch_files.append(bfile)
+        last_result = result
+        arcs, carryover = _parse_story_arc_result(result)
 
-    # 2. 合并子纲为卷纲
+        for arc in arcs:
+            # 防止模型偶尔输出反向或越界范围；不强改文本，只约束文件名和索引。
+            arc_start = max(1, min(arc["start_ch"], arc["end_ch"]))
+            arc_end = min(total, max(arc["start_ch"], arc["end_ch"]))
+            fname = _arc_file_name(arc_idx, arc_start, arc_end)
+            fpath = os.path.join(arc_path, fname)
+            _write_file(fpath, arc["content"])
+            arc_items.append({
+                "idx": arc_idx,
+                "start_ch": arc_start,
+                "end_ch": arc_end,
+                "file": fname,
+                "path": fpath,
+                "content": arc["content"],
+            })
+            arc_idx += 1
+
+        _write_story_arc_index(vol_dir, arc_items)
+
+    if not arc_items and last_result:
+        fname = _arc_file_name(1, 1, total)
+        fpath = os.path.join(arc_path, fname)
+        fallback = (
+            f"【情节1：第1-{total}章｜格式兜底情节】\n"
+            "情节功能：模型未按标准格式输出，以下保留原始分析结果供后续人工检查。\n\n"
+            + last_result
+        )
+        _write_file(fpath, fallback)
+        arc_items.append({
+            "idx": 1,
+            "start_ch": 1,
+            "end_ch": total,
+            "file": fname,
+            "path": fpath,
+            "content": fallback,
+        })
+        _write_story_arc_index(vol_dir, arc_items)
+        carryover = ""
+
+    carryover_path = os.path.join(arc_path, "_carryover.md")
+    if carryover:
+        _write_file(carryover_path, carryover)
+        print(f"    -> 仍有未闭合情节续接区：{carryover_path}")
+    elif os.path.exists(carryover_path):
+        os.remove(carryover_path)
+
+    print(f"    -> 故事情节单元已保存：{len(arc_items)} 个")
+    return arc_items
+
+
+def _generate_volume_outline_from_arcs(vol_dir, volume_title, total_chapters, llm,
+                                       start_chapter=1, end_chapter=None):
+    """读取故事情节单元，合并生成卷纲。"""
     vol_outline_path = os.path.join(vol_dir, "volume_outline.md")
     existing_outline = _read_file(vol_outline_path)
     if existing_outline:
         print(f"    -> 卷纲已存在，跳过合并。")
         return existing_outline
 
-    # 读取所有子纲文件（不占用累积内存，逐文件读取）
-    batch_summaries = []
-    for bf in batch_files:
-        content = _read_file(bf)
-        if content:
-            batch_summaries.append(content)
+    arc_items = _load_story_arc_texts(vol_dir)
+    if not arc_items:
+        return ""
 
-    if len(batch_summaries) <= 1:
-        # 只有一批，直接作为卷纲
-        outline = batch_summaries[0] if batch_summaries else ""
-        _write_file(vol_outline_path, outline)
-        print(f"    -> 卷纲已保存：{vol_outline_path}")
-        return outline
+    end_chapter = end_chapter or total_chapters
+    arc_summaries = [item["content"] for item in arc_items]
+    if len(arc_summaries) == 1:
+        outline = arc_summaries[0]
+    else:
+        print(f"    -> 合并 {len(arc_summaries)} 个故事情节单元为卷纲...")
+        all_subs = "\n\n---\n\n".join(arc_summaries)
+        merge_prompt = PromptLoader.load(
+            "volume_merge",
+            volume_title=volume_title,
+            start_chapter=start_chapter,
+            end_chapter=end_chapter,
+            total_chapters=total_chapters,
+            total_batches=len(arc_summaries),
+            batch_summaries=all_subs,
+        )
+        outline = normalize_text(llm.generate(merge_prompt))
 
-    # 多批合并
-    print(f"    -> 合并 {len(batch_summaries)} 段子纲为卷纲...")
-    all_subs = "\n\n---\n\n".join(batch_summaries)
-    merge_prompt = PromptLoader.load(
-        "volume_merge",
-        volume_title=volume_title,
-        start_chapter=1,
-        end_chapter=total,
-        total_chapters=total,
-        total_batches=len(batch_summaries),
-        batch_summaries=all_subs
-    )
-    merged = normalize_text(llm.generate(merge_prompt))
-    _write_file(vol_outline_path, merged)
+    _write_file(vol_outline_path, outline)
     print(f"    -> 卷纲已保存：{vol_outline_path}")
-    return merged
+    return outline
 
 
-def extract_novel_outline(volume_outlines, llm, outlines_dir):
+def extract_volume_outline(vol_idx, volume_title, chapters, llm, outlines_dir, batch_size=20):
+    """提取单卷卷纲。先抽取故事情节单元，再合并为卷纲。"""
+    vol_dir = os.path.join(outlines_dir, _vol_dir_name(vol_idx, volume_title))
+    total = len(chapters)
+    print(f"    [{volume_title}] 共 {total} 章")
+    _extract_story_arcs_for_volume(vol_idx, volume_title, chapters, llm, outlines_dir, batch_size)
+    return _generate_volume_outline_from_arcs(vol_dir, volume_title, total, llm)
+
+
+def extract_novel_outline(volume_outlines, llm, outlines_dir, force=False):
     """汇总所有卷纲，生成完整大纲。"""
     novel_outline_path = os.path.join(outlines_dir, "novel_outline.md")
     existing = _read_file(novel_outline_path)
-    if existing:
+    if existing and not force:
         print(f"  -> 完整大纲已存在，跳过。")
         return existing
 
@@ -366,6 +522,20 @@ def extract_novel_outline(volume_outlines, llm, outlines_dir):
     _write_file(novel_outline_path, novel_outline)
     print(f"  -> 完整大纲已保存：{novel_outline_path}")
     return novel_outline
+
+
+def _volume_dirs(outlines_dir):
+    items = []
+    if not os.path.isdir(outlines_dir):
+        return items
+    for name in sorted(os.listdir(outlines_dir)):
+        m = VOL_DIR_RE.match(name)
+        if not m:
+            continue
+        vol_path = os.path.join(outlines_dir, name)
+        if os.path.isdir(vol_path):
+            items.append((name, vol_path))
+    return items
 
 
 def _parse_virtual_volumes(llm_result):
@@ -384,8 +554,10 @@ def _parse_virtual_volumes(llm_result):
 
 
 def _extract_segment_endpoints(batch_dir):
-    """从批次摘要文件中提取所有故事片段的结束章节号。返回排序后的端点列表。"""
+    """从故事情节单元或旧批次摘要中提取所有片段结束章节号。"""
     endpoints = set()
+    for item in _story_arc_files(batch_dir):
+        endpoints.add(item["end_ch"])
     for bf in sorted(os.listdir(batch_dir)):
         if not re.match(r'^batch_\d+_\d+\.md$', bf):
             continue
@@ -450,6 +622,27 @@ def _assign_batches_to_volumes(src_dir, virtual_volumes):
     return assignment
 
 
+def _assign_story_arcs_to_volumes(src_dir, virtual_volumes):
+    """将 story arc 文件分配给覆盖比例最大的虚拟卷。"""
+    arcs = _story_arc_files(src_dir)
+    assignment = {i: [] for i in range(len(virtual_volumes))}
+
+    for arc in arcs:
+        best_vol = -1
+        best_overlap = 0
+        for i, (vi, title, start_ch, end_ch) in enumerate(virtual_volumes):
+            overlap_start = max(arc["start_ch"], start_ch)
+            overlap_end = min(arc["end_ch"], end_ch)
+            overlap = max(0, overlap_end - overlap_start + 1)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_vol = i
+        if best_vol >= 0:
+            assignment[best_vol].append(arc)
+
+    return assignment
+
+
 def _copy_chapter_outlines_for_volume(src_dir, dst_dir, start_ch, end_ch):
     """从 src_dir/chapter_outlines/ 复制 [start_ch, end_ch] 范围的章纲到 dst_dir/chapter_outlines/。"""
     src_ch_dir = os.path.join(src_dir, "chapter_outlines")
@@ -464,11 +657,22 @@ def _copy_chapter_outlines_for_volume(src_dir, dst_dir, start_ch, end_ch):
 
 
 def _generate_virtual_volume_outline(vol_dir, start_ch, end_ch, llm):
-    """读取虚拟卷覆盖的批次摘要，调用 LLM 生成卷纲。"""
+    """读取虚拟卷覆盖的情节单元或旧批次摘要，调用 LLM 生成卷纲。"""
     vol_outline_path = os.path.join(vol_dir, "volume_outline.md")
     existing = _read_file(vol_outline_path)
     if existing:
         return existing
+
+    arc_items = _load_story_arc_texts(vol_dir)
+    if arc_items:
+        return _generate_volume_outline_from_arcs(
+            vol_dir,
+            "虚拟卷",
+            end_ch - start_ch + 1,
+            llm,
+            start_chapter=start_ch,
+            end_chapter=end_ch,
+        )
 
     batch_summaries = []
     for bf in sorted(os.listdir(vol_dir)):
@@ -503,8 +707,10 @@ def _generate_virtual_volume_outline(vol_dir, start_ch, end_ch, llm):
 
 
 def _extract_segment_ranges(batch_dir):
-    """从批次摘要中提取故事片段的章节范围。返回 [(start_ch, end_ch), ...]。"""
+    """从故事情节单元或旧批次摘要中提取故事片段章节范围。"""
     segments = []
+    for item in _story_arc_files(batch_dir):
+        segments.append((item["start_ch"], item["end_ch"]))
     for bf in sorted(os.listdir(batch_dir)):
         if not re.match(r'^batch_\d+_\d+\.md$', bf):
             continue
@@ -561,22 +767,17 @@ def _generate_chapter_outlines_batch(chapters_batch, llm):
 
 
 def _load_existing_volumes(outlines_dir, groups, chapters):
-    """检查是否已有完整的批次摘要和卷纲。如果有，返回 {volume_outlines, groups}；否则返回 None。
+    """检查是否已有完整的情节单元/旧批次摘要和卷纲。如果有，返回 {volume_outlines, groups}。
 
     支持两种情况：
-    1. 自然卷：vol_XX_<title>/ 下有 batch 文件和 volume_outline.md
-    2. 虚拟卷：vol_XX_<title>/ 下有 meta.json、batch 文件和 volume_outline.md
+    1. 新版：vol_XX_<title>/story_arcs/ 下有 arc 文件和 volume_outline.md
+    2. 旧版：vol_XX_<title>/ 下有 batch 文件和 volume_outline.md
     """
     if not os.path.isdir(outlines_dir):
         return None
 
     # 扫描已有的卷目录
-    vol_dirs = []
-    for name in sorted(os.listdir(outlines_dir)):
-        if VOL_DIR_RE.match(name):
-            vol_path = os.path.join(outlines_dir, name)
-            if os.path.isdir(vol_path):
-                vol_dirs.append((name, vol_path))
+    vol_dirs = _volume_dirs(outlines_dir)
 
     if not vol_dirs:
         return None
@@ -597,9 +798,10 @@ def _load_existing_volumes(outlines_dir, groups, chapters):
             all_complete = False
             break
 
-        # 检查批次文件
+        # 检查新版故事情节单元或旧版批次文件
+        arc_files = _story_arc_files(vol_path)
         batch_files = [f for f in os.listdir(vol_path) if re.match(r'^batch_\d+_\d+\.md$', f)]
-        if not batch_files:
+        if not arc_files and not batch_files:
             all_complete = False
             break
 
@@ -648,16 +850,16 @@ def run_outline_build(txt_path=None, output_dir=None, batch_size=20, skip_chapte
 
     # 1. 切分章节并识别卷
     volumes, chapters = split_chapters(txt_path)
-    print(f"解析出 {len(volumes)} 卷，{len(chapters)} 章，每批 {batch_size} 章。")
+    print(f"解析出 {len(volumes)} 卷，{len(chapters)} 章，每次读取 {batch_size} 章识别故事情节。")
 
     # 2. 按卷分组
     groups = group_chapters_by_volume(chapters, volumes)
     for g in groups:
         n = len(g['chapters'])
-        batches = (n + batch_size - 1) // batch_size
-        print(f"  {g['title']}：{n} 章 -> {batches} 批")
+        windows = (n + batch_size - 1) // batch_size
+        print(f"  {g['title']}：{n} 章 -> {windows} 个读取窗口")
 
-    # 3. 检查是否已有完整的批次摘要和卷纲（跳过阶段一）
+    # 3. 检查是否已有完整的情节单元和卷纲（跳过阶段一）
     existing_volumes = _load_existing_volumes(outlines_dir, groups, chapters)
 
     # 4. 初始化 LLM
@@ -671,12 +873,12 @@ def run_outline_build(txt_path=None, output_dir=None, batch_size=20, skip_chapte
 
     if existing_volumes:
         # 已有完整数据，跳过阶段一和虚拟分卷
-        print(f"\n--- 阶段一：已跳过（检测到已有批次摘要和卷纲） ---")
+        print(f"\n--- 阶段一：已跳过（检测到已有故事情节单元/旧批次摘要和卷纲） ---")
         volume_outlines = existing_volumes["volume_outlines"]
         groups = existing_volumes["groups"]
     else:
-        # 4. 按卷提取批次摘要和卷纲（增量保存）
-        print(f"\n--- 阶段一：按卷提取批次摘要和卷纲 ---")
+        # 4. 按卷提取故事情节单元和卷纲（增量保存）
+        print(f"\n--- 阶段一：按卷提取故事情节单元和卷纲 ---")
         volume_outlines = []
         for vi, g in enumerate(groups):
             print(f"\n  处理：{g['title']}")
@@ -695,11 +897,11 @@ def run_outline_build(txt_path=None, output_dir=None, batch_size=20, skip_chapte
     extract_novel_outline(volume_outlines, llm, outlines_dir)
 
 def resegment(outlines_dir):
-    """基于已有批次摘要重新执行虚拟分卷。
+    """基于已有故事情节单元或旧批次摘要重新执行虚拟分卷。
 
     两种情况：
     1. vol_01_全书/ 存在：直接从此目录重新分卷。
-    2. 已有虚拟卷目录（含 meta.json）：将所有卷的批次摘要汇总到 vol_01_全书/ 并去重，再重新分卷。
+    2. 已有虚拟卷目录（含 meta.json）：将所有卷的情节单元/批次摘要汇总到 vol_01_全书/ 并去重，再重新分卷。
     """
     all_batch_dir = None
     for name in os.listdir(outlines_dir):
@@ -708,47 +910,61 @@ def resegment(outlines_dir):
             break
 
     if not all_batch_dir or not os.path.isdir(all_batch_dir):
-        # 没有全书目录，查找虚拟卷目录并汇总批次摘要
-        vol_dirs = []
-        for name in sorted(os.listdir(outlines_dir)):
-            vol_path = os.path.join(outlines_dir, name)
-            if os.path.isdir(vol_path) and VOL_DIR_RE.match(name):
-                vol_dirs.append((name, vol_path))
+        # 没有全书目录，查找虚拟卷目录并汇总情节单元/批次摘要
+        vol_dirs = _volume_dirs(outlines_dir)
 
         if not vol_dirs:
             print("错误：未找到任何卷目录，无法执行重新分卷。")
             return
 
-        print("  -> 未找到 vol_01_全书，从现有虚拟卷汇总批次摘要...")
+        print("  -> 未找到 vol_01_全书，从现有卷目录汇总故事情节单元...")
         all_batch_dir = os.path.join(outlines_dir, _vol_dir_name(0, "全书"))
         os.makedirs(all_batch_dir, exist_ok=True)
+        os.makedirs(_arc_dir(all_batch_dir), exist_ok=True)
 
-        # 收集所有批次文件并按文件名去重（同名文件只保留一份）
+        # 收集所有 story arc 和旧 batch 文件并按文件名去重
         seen = set()
+        seen_batches = set()
         for name, vol_path in vol_dirs:
+            for arc in _story_arc_files(vol_path):
+                if arc["file"] in seen:
+                    continue
+                shutil.copy2(arc["path"], os.path.join(_arc_dir(all_batch_dir), arc["file"]))
+                seen.add(arc["file"])
             for bf in sorted(os.listdir(vol_path)):
-                if re.match(r'^batch_\d+_\d+\.md$', bf) and bf not in seen:
+                if re.match(r'^batch_\d+_\d+\.md$', bf) and bf not in seen_batches:
                     shutil.copy2(os.path.join(vol_path, bf), os.path.join(all_batch_dir, bf))
-                    seen.add(bf)
+                    seen_batches.add(bf)
 
         # 删除旧的虚拟卷目录
         for name, vol_path in vol_dirs:
             shutil.rmtree(vol_path, ignore_errors=True)
             print(f"  -> 已删除旧卷目录：{name}")
 
-        print(f"  -> 已汇总 {len(seen)} 个批次摘要到 vol_01_全书/")
+        print(f"  -> 已汇总 {len(seen)} 个故事情节单元、{len(seen_batches)} 个旧批次摘要到 vol_01_全书/")
 
-    # 以下统一处理：从 all_batch_dir 读取批次摘要并重新分卷
+    # 以下统一处理：优先从 story arcs 读取，旧工作区回退 batch 摘要
+    arc_items = _load_story_arc_texts(all_batch_dir)
+    segment_summaries = []
+    if arc_items:
+        segment_summaries = [item["content"] for item in arc_items]
+    else:
+        for bf in sorted(os.listdir(all_batch_dir)):
+            if re.match(r'^batch_\d+_\d+\.md$', bf):
+                content = _read_file(os.path.join(all_batch_dir, bf))
+                if content:
+                    segment_summaries.append(content)
+
+    if not segment_summaries:
+        print("错误：未找到故事情节单元或批次摘要。")
+        return
+
     batch_summaries = []
     for bf in sorted(os.listdir(all_batch_dir)):
         if re.match(r'^batch_\d+_\d+\.md$', bf):
             content = _read_file(os.path.join(all_batch_dir, bf))
             if content:
                 batch_summaries.append(content)
-
-    if not batch_summaries:
-        print("错误：未找到批次摘要。")
-        return
 
     # 初始化 LLM
     builder_config = ConfigLoader.get_data_builder_config()
@@ -761,16 +977,19 @@ def resegment(outlines_dir):
 
     # 推算总章数
     total_ch = 0
-    for bf in sorted(os.listdir(all_batch_dir)):
-        m = re.match(r'^batch_\d+_(\d+)\.md$', bf)
-        if m:
-            total_ch = max(total_ch, int(m.group(1)))
+    if arc_items:
+        total_ch = max(item["end_ch"] for item in arc_items)
+    else:
+        for bf in sorted(os.listdir(all_batch_dir)):
+            m = re.match(r'^batch_\d+_(\d+)\.md$', bf)
+            if m:
+                total_ch = max(total_ch, int(m.group(1)))
 
     print(f">>> 虚拟分卷（重新分卷）<<<")
-    print(f"  批次摘要：{len(batch_summaries)} 个文件，约 {total_ch} 章")
+    print(f"  故事情节单元/摘要：{len(segment_summaries)} 个文件，约 {total_ch} 章")
 
-    all_batches_text = "\n\n---\n\n".join(batch_summaries)
-    print(f"  -> 调用 LLM 分析批次摘要，识别卷边界...")
+    all_batches_text = "\n\n---\n\n".join(segment_summaries)
+    print(f"  -> 调用 LLM 分析故事情节单元，识别卷边界...")
     seg_prompt = PromptLoader.load("virtual_volume_segment", batch_summaries=all_batches_text)
     seg_result = normalize_text(llm.generate(seg_prompt))
 
@@ -795,7 +1014,8 @@ def resegment(outlines_dir):
     covered = sum(ec - sc + 1 for _, _, sc, ec in virtual_volumes)
     print(f"  -> 覆盖：{covered}/{total_ch} 章")
 
-    # 分配批次文件
+    # 分配故事情节单元/旧批次文件
+    arc_assignment = _assign_story_arcs_to_volumes(all_batch_dir, virtual_volumes)
     batch_assignment = _assign_batches_to_volumes(all_batch_dir, virtual_volumes)
 
     # 为每个虚拟卷创建目录、复制文件、生成卷纲
@@ -806,6 +1026,9 @@ def resegment(outlines_dir):
 
         print(f"  -> 组织卷{vi}（{vol_title}，第{start_ch}-{end_ch}章）...")
         os.makedirs(vol_dir, exist_ok=True)
+        os.makedirs(_arc_dir(vol_dir), exist_ok=True)
+        for arc in arc_assignment.get(i, []):
+            shutil.copy2(arc["path"], os.path.join(_arc_dir(vol_dir), arc["file"]))
         for bf in batch_assignment.get(i, []):
             shutil.copy2(os.path.join(all_batch_dir, bf), os.path.join(vol_dir, bf))
 
@@ -829,7 +1052,7 @@ def resegment(outlines_dir):
 
     # 重新生成大纲
     print(f"\n  -> 重新汇总生成大纲...")
-    extract_novel_outline(new_volume_outlines, llm, outlines_dir)
+    extract_novel_outline(new_volume_outlines, llm, outlines_dir, force=True)
 
     print(f"\n>>> 虚拟分卷完成 <<<")
     print(f"  卷纲汇总：{volume_outline_path}")
@@ -896,188 +1119,10 @@ def _ensure_min_chapters(virtual_volumes, min_chapters=60):
     return final
 
 
-    # 4.5 虚拟分卷：如果只有"全书"伪卷，自动划分为虚拟卷
-    need_virtual = len(groups) == 1 and groups[0]["title"] == "全书"
-    if need_virtual:
-        print(f"\n--- 虚拟分卷：全书无自然分卷，自动识别卷边界 ---")
-        all_batch_dir = os.path.join(outlines_dir, _vol_dir_name(0, "全书"))
-
-        # 读取所有批次摘要
-        batch_summaries = []
-        for bf in sorted(os.listdir(all_batch_dir)):
-            if re.match(r'^batch_\d+_\d+\.md$', bf):
-                content = _read_file(os.path.join(all_batch_dir, bf))
-                if content:
-                    batch_summaries.append(content)
-
-        if not batch_summaries:
-            print("  错误：未找到批次摘要，跳过虚拟分卷。")
-        else:
-            all_batches_text = "\n\n---\n\n".join(batch_summaries)
-            print(f"  -> 调用 LLM 分析 {len(batch_summaries)} 个批次摘要，识别卷边界...")
-            seg_prompt = PromptLoader.load("virtual_volume_segment", batch_summaries=all_batches_text)
-            seg_result = normalize_text(llm.generate(seg_prompt))
-
-            virtual_volumes = _parse_virtual_volumes(seg_result)
-            if not virtual_volumes:
-                print("  警告：LLM 未输出有效分卷结果，保持原状。")
-            else:
-                # 将边界对齐到故事片段端点
-                segment_endpoints = _extract_segment_endpoints(all_batch_dir)
-                total_ch = len(groups[0]["chapters"])
-                virtual_volumes = _snap_to_segments(virtual_volumes, segment_endpoints, total_ch)
-                virtual_volumes = _ensure_full_coverage(virtual_volumes, total_ch)
-
-                print(f"  -> 识别出 {len(virtual_volumes)} 卷（已对齐片段边界）：")
-                for vi, title, sc, ec in virtual_volumes:
-                    print(f"     卷{vi}：{title}（第{sc}-{ec}章，{ec - sc + 1}章）")
-                covered = sum(ec - sc + 1 for _, _, sc, ec in virtual_volumes)
-                print(f"  -> 覆盖：{covered}/{total_ch} 章")
-
-                # 为每个虚拟卷创建目录、复制文件、生成卷纲
-                batch_assignment = _assign_batches_to_volumes(all_batch_dir, virtual_volumes)
-                new_volume_outlines = []
-                for i, (vi, vol_title, start_ch, end_ch) in enumerate(virtual_volumes):
-                    vol_dir_name = _vol_dir_name(vi - 1, vol_title)
-                    vol_dir = os.path.join(outlines_dir, vol_dir_name)
-
-                    print(f"  -> 组织卷{vi}（{vol_title}，第{start_ch}-{end_ch}章）...")
-                    os.makedirs(vol_dir, exist_ok=True)
-                    for bf in batch_assignment.get(i, []):
-                        shutil.copy2(os.path.join(all_batch_dir, bf), os.path.join(vol_dir, bf))
-
-                    # 写入虚拟卷元数据，供 reference_finder 使用
-                    meta = {"start_ch": start_ch, "end_ch": end_ch}
-                    with open(os.path.join(vol_dir, "meta.json"), "w", encoding="utf-8") as f:
-                        json.dump(meta, f, ensure_ascii=False)
-
-                    outline = _generate_virtual_volume_outline(vol_dir, start_ch, end_ch, llm)
-                    new_volume_outlines.append({"title": vol_title, "outline": outline})
-                    print(f"     卷纲已生成")
-
-                # 删除原始"全书"伪卷目录
-                shutil.rmtree(all_batch_dir, ignore_errors=True)
-
-                # 重建 groups 和 volume_outlines
-                volume_outlines = new_volume_outlines
-                new_groups = []
-                all_chapters = groups[0]["chapters"]
-                for vi, vol_title, start_ch, end_ch in virtual_volumes:
-                    vol_chapters = [all_chapters[i] for i in range(len(all_chapters))
-                                    if start_ch <= (i + 1) <= end_ch]
-                    new_groups.append({"title": vol_title, "chapters": vol_chapters})
-                groups = new_groups
-
-                # 重写汇总卷纲文件
-                with open(volume_outline_path, "w", encoding="utf-8") as f:
-                    f.write("# 参考小说卷纲\n\n")
-                    for vo in volume_outlines:
-                        f.write(f"## {vo['title']}\n\n{vo['outline']}\n\n---\n\n")
-                print(f"  -> 虚拟分卷完成，卷纲已更新")
-
-    # 5. 按卷提取每章章纲（按故事片段分批，每批最多5章）
-    if not skip_chapter_outlines:
-        MAX_CHAPTERS_PER_BATCH = 5
-        print(f"\n--- 阶段二：提取每章章纲（按片段分批） ---")
-        for vi, g in enumerate(groups):
-            vol_dir = os.path.join(outlines_dir, _vol_dir_name(vi, g["title"]))
-            ch_outlines_dir = os.path.join(vol_dir, "chapter_outlines")
-            os.makedirs(ch_outlines_dir, exist_ok=True)
-            print(f"\n  {g['title']}：{len(g['chapters'])} 章")
-
-            # 从批次摘要中提取片段范围
-            segment_ranges = _extract_segment_ranges(vol_dir)
-
-            # 检测是否为虚拟卷，获取章节偏移量
-            meta_path = os.path.join(vol_dir, "meta.json")
-            vol_offset = 0
-            if os.path.exists(meta_path):
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    meta = json.load(f)
-                vol_offset = meta["start_ch"] - 1
-
-            if segment_ranges:
-                # 按片段分批
-                for seg_start, seg_end in segment_ranges:
-                    # 收集本片段中尚未生成章纲的章节
-                    seg_chapters = []
-                    for ci, ch in enumerate(g["chapters"]):
-                        global_ch = ci + 1 + vol_offset
-                        local_ch = ci + 1
-                        if seg_start <= global_ch <= seg_end:
-                            ch_file = os.path.join(ch_outlines_dir, f"chapter_{local_ch:03d}.md")
-                            if not _read_file(ch_file):
-                                seg_chapters.append((global_ch, ch))
-
-                    if not seg_chapters:
-                        continue
-
-                    # 按 MAX_CHAPTERS_PER_BATCH 切分
-                    for bi in range(0, len(seg_chapters), MAX_CHAPTERS_PER_BATCH):
-                        batch = seg_chapters[bi:bi + MAX_CHAPTERS_PER_BATCH]
-                        ch_range = f"{batch[0][0]}-{batch[-1][0]}"
-                        print(f"    -> 批量提取第{ch_range}章章纲（{len(batch)}章）...")
-                        outlines = _generate_chapter_outlines_batch(batch, llm)
-                        for ch_num, outline in outlines.items():
-                            local_num = ch_num - vol_offset
-                            ch_file = os.path.join(ch_outlines_dir, f"chapter_{local_num:03d}.md")
-                            _write_file(ch_file, outline)
-                        # 处理 LLM 未返回的章节
-                        for ch_num, ch in batch:
-                            local_num = ch_num - vol_offset
-                            ch_file = os.path.join(ch_outlines_dir, f"chapter_{local_num:03d}.md")
-                            if not _read_file(ch_file):
-                                print(f"    -> 第{ch_num}章未在批量结果中，单独生成...")
-                                prompt = PromptLoader.load(
-                                    "chapter_outline_extract",
-                                    chapters_text=f"=== 第{ch_num}章 ===\n{ch['content']}",
-                                )
-                                result = normalize_text(llm.generate(prompt))
-                                _write_file(ch_file, result)
-                        saved_count = sum(1 for cn, _ in batch if _read_file(os.path.join(ch_outlines_dir, f"chapter_{cn - vol_offset:03d}.md")))
-                        print(f"    -> 第{ch_range}章章纲已保存（{saved_count}/{len(batch)}）")
-            else:
-                # 无片段信息时，按固定批次切分
-                pending = []
-                for ci, ch in enumerate(g["chapters"]):
-                    ch_num = ci + 1
-                    ch_file = os.path.join(ch_outlines_dir, f"chapter_{ch_num:03d}.md")
-                    if not _read_file(ch_file):
-                        pending.append((ch_num, ch))
-
-                for bi in range(0, len(pending), MAX_CHAPTERS_PER_BATCH):
-                    batch = pending[bi:bi + MAX_CHAPTERS_PER_BATCH]
-                    ch_range = f"{batch[0][0]}-{batch[-1][0]}"
-                    print(f"    -> 批量提取第{ch_range}章章纲（{len(batch)}章）...")
-                    outlines = _generate_chapter_outlines_batch(batch, llm)
-                    for ch_num, outline in outlines.items():
-                        ch_file = os.path.join(ch_outlines_dir, f"chapter_{ch_num:03d}.md")
-                        _write_file(ch_file, outline)
-                    for ch_num, ch in batch:
-                        ch_file = os.path.join(ch_outlines_dir, f"chapter_{ch_num:03d}.md")
-                        if not _read_file(ch_file):
-                            print(f"    -> 第{ch_num}章未在批量结果中，单独生成...")
-                            prompt = PromptLoader.load(
-                                "chapter_outline_extract",
-                                chapters_text=f"=== 第{ch_num}章 ===\n{ch['content']}",
-                            )
-                            result = normalize_text(llm.generate(prompt))
-                            _write_file(ch_file, result)
-                    print(f"    -> 第{ch_range}章章纲已保存")
-    else:
-        print(f"\n--- 阶段二：跳过章纲提取（skip_chapter_outlines=True） ---")
-
-    # 6. 汇总生成大纲
-    print(f"\n--- 阶段三：汇总生成大纲 ---")
-    extract_novel_outline(volume_outlines, llm, outlines_dir)
-
-    print(f"\n>>> 参考小说大纲梳理完成 <<<")
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="从参考小说中梳理大纲和卷纲")
     parser.add_argument("--novel", type=str, required=True, help="工作区名称")
-    parser.add_argument("--batch-size", type=int, default=30, help="每批章节数（默认30）")
+    parser.add_argument("--batch-size", type=int, default=20, help="每次读取章节数，用于识别故事情节单元（默认20）")
     parser.add_argument("--txt-path", type=str, default=None, help="小说文件路径（默认使用工作区 reference/sample_novel.txt）")
     parser.add_argument("--output-dir", type=str, default=None, help="输出目录（默认使用工作区 reference/）")
     args = parser.parse_args()
