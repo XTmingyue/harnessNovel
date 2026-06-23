@@ -13,7 +13,6 @@ from core.workspace import init_workspace
 from core.adaptation import (
     append_adaptation_report,
     format_forbidden_terms,
-    load_forbidden_terms,
     load_rewrite_map,
     scan_forbidden_terms,
 )
@@ -88,18 +87,28 @@ def _write_file(path, content):
         f.write(content + "\n")
 
 
-def _audit_text(ws, label, text, forbidden_terms, exempt_line_patterns=None):
-    """轻量审计生成文本中的参考元素残留，返回违规词列表。"""
-    violations = scan_forbidden_terms(
-        text,
-        forbidden_terms,
-        exempt_line_patterns=exempt_line_patterns,
-    )
-    if violations:
-        msg = f"{label} 检测到疑似参考元素残留：{', '.join(violations)}"
-        print(f"  警告：{msg}")
-        append_adaptation_report(ws, label, msg)
-    return violations
+def run_step(*, llm, folder, prompt_vars, output_path, label=None,
+             header=None, save=None, write_guard=False):
+    """核心生成三联：load→generate→normalize→write，可选 header/save 打印。
+
+    label 同时作为 header/save 的派生基础（默认 header=">>> 生成{label} <<<"，
+    save="  -> {label}已保存：{output_path}"，冒号为全角）；显式传入 header/save
+    则覆盖派生。label=None 且不传 header/save 时静默（无打印）。
+    write_guard=True 时仅在 result 非空时写盘与打印 save。
+    """
+    if label is not None and header is None:
+        header = f">>> 生成{label} <<<"
+    if label is not None and save is None:
+        save = f"  -> {label}已保存：{output_path}"
+    if header is not None:
+        print(header)
+    prompt = PromptLoader.load(folder, **prompt_vars)
+    result = normalize_text(llm.generate(prompt))
+    if result or not write_guard:
+        _write_file(output_path, result)
+    if save is not None and (result or not write_guard):
+        print(save)
+    return result
 
 
 def _load_creative_direction(ws, cli_input=None, direction_file=None):
@@ -146,19 +155,20 @@ def _gen_rewrite_map(ws, llm, force=False):
         print("  警告：参考大纲或新小说大纲缺失，暂不生成换皮映射表。")
         return ""
 
-    print(">>> 生成全书换皮映射表 <<<")
-    prompt = PromptLoader.load(
-        "rewrite_map_extract",
-        reference_outline=reference_outline,
-        reference_worldview=reference_worldview or "（未提取参考世界观）",
-        novel_outline=novel_outline,
-        new_novel_worldview=new_worldview or "（未生成新小说世界观）",
+    return run_step(
+        llm=llm,
+        folder="rewrite_map_extract",
+        label="全书换皮映射表",
+        save=f"  -> 换皮映射表已保存：{output_path}",
+        write_guard=True,
+        output_path=output_path,
+        prompt_vars=dict(
+            reference_outline=reference_outline,
+            reference_worldview=reference_worldview or "（未提取参考世界观）",
+            novel_outline=novel_outline,
+            new_novel_worldview=new_worldview or "（未生成新小说世界观）",
+        ),
     )
-    result = normalize_text(llm.generate(prompt))
-    if result:
-        _write_file(output_path, result)
-        print(f"  -> 换皮映射表已保存：{output_path}")
-    return result
 
 
 def _ensure_rewrite_map(ws, llm):
@@ -396,19 +406,19 @@ def _gen_core_gameplay(ws, llm, direction, world_knowledge, force=False):
     reference_outline = load_reference_novel_outline(ws.reference_outlines)
     reference_worldview = _read_file(os.path.join(ws.file_system, "reference_worldview.md")) or "（未提取参考世界观）"
 
-    print(">>> 生成核心玩法文档 <<<")
-    prompt = PromptLoader.load(
-        "core_gameplay_design",
-        creative_direction=direction or "（用户未提供具体方向）",
-        reference_outline=reference_outline or "（无参考小说全书大纲）",
-        reference_worldview=reference_worldview,
-        world_knowledge=world_knowledge or "（未提供目标世界知识库）",
-        outline_rules=_load_outline_rules(ws),
+    return run_step(
+        llm=llm,
+        folder="core_gameplay_design",
+        label="核心玩法文档",
+        output_path=output_path,
+        prompt_vars=dict(
+            creative_direction=direction or "（用户未提供具体方向）",
+            reference_outline=reference_outline or "（无参考小说全书大纲）",
+            reference_worldview=reference_worldview,
+            world_knowledge=world_knowledge or "（未提供目标世界知识库）",
+            outline_rules=_load_outline_rules(ws),
+        ),
     )
-    result = normalize_text(llm.generate(prompt))
-    _write_file(output_path, result)
-    print(f"  -> 核心玩法文档已保存：{output_path}")
-    return result
 
 
 def _gen_long_mainline(ws, llm, direction, world_knowledge, force=False):
@@ -422,19 +432,19 @@ def _gen_long_mainline(ws, llm, direction, world_knowledge, force=False):
     reference_worldview = _read_file(os.path.join(ws.file_system, "reference_worldview.md")) or "（未提取参考世界观）"
     core_gameplay = _read_file(_story_design_path(ws, "core_gameplay.md")) or "（未生成核心玩法文档）"
 
-    print(">>> 生成全书长线主线 <<<")
-    prompt = PromptLoader.load(
-        "long_mainline_design",
-        creative_direction=direction or "（用户未提供具体方向）",
-        core_gameplay=core_gameplay,
-        reference_outline=reference_outline or "（无参考小说全书大纲）",
-        reference_worldview=reference_worldview,
-        world_knowledge=world_knowledge or "（未提供目标世界知识库）",
+    return run_step(
+        llm=llm,
+        folder="long_mainline_design",
+        label="全书长线主线",
+        output_path=output_path,
+        prompt_vars=dict(
+            creative_direction=direction or "（用户未提供具体方向）",
+            core_gameplay=core_gameplay,
+            reference_outline=reference_outline or "（无参考小说全书大纲）",
+            reference_worldview=reference_worldview,
+            world_knowledge=world_knowledge or "（未提供目标世界知识库）",
+        ),
     )
-    result = normalize_text(llm.generate(prompt))
-    _write_file(output_path, result)
-    print(f"  -> 全书长线主线已保存：{output_path}")
-    return result
 
 
 def _gen_stage_roadmap(ws, llm, direction, world_knowledge, force=False):
@@ -447,18 +457,19 @@ def _gen_stage_roadmap(ws, llm, direction, world_knowledge, force=False):
     core_gameplay = _read_file(_story_design_path(ws, "core_gameplay.md")) or "（未生成核心玩法文档）"
     long_mainline = _read_file(_story_design_path(ws, "long_mainline.md")) or "（未生成全书长线主线）"
 
-    print(">>> 生成全书舞台路线图 <<<")
-    prompt = PromptLoader.load(
-        "stage_roadmap_design",
-        creative_direction=direction or "（用户未提供具体方向）",
-        core_gameplay=core_gameplay,
-        long_mainline=long_mainline,
-        world_knowledge=world_knowledge or "（未提供目标世界知识库）",
+    return run_step(
+        llm=llm,
+        folder="stage_roadmap_design",
+        label="全书舞台路线图",
+        save=f"  -> 舞台路线图已保存：{output_path}",
+        output_path=output_path,
+        prompt_vars=dict(
+            creative_direction=direction or "（用户未提供具体方向）",
+            core_gameplay=core_gameplay,
+            long_mainline=long_mainline,
+            world_knowledge=world_knowledge or "（未提供目标世界知识库）",
+        ),
     )
-    result = normalize_text(llm.generate(prompt))
-    _write_file(output_path, result)
-    print(f"  -> 舞台路线图已保存：{output_path}")
-    return result
 
 
 def _gen_character_arcs(ws, llm, direction, world_knowledge, force=False):
@@ -472,19 +483,19 @@ def _gen_character_arcs(ws, llm, direction, world_knowledge, force=False):
     long_mainline = _read_file(_story_design_path(ws, "long_mainline.md")) or "（未生成全书长线主线）"
     stage_roadmap = _read_file(_story_design_path(ws, "stage_roadmap.md")) or "（未生成舞台路线图）"
 
-    print(">>> 生成角色成长线 <<<")
-    prompt = PromptLoader.load(
-        "character_arcs_design",
-        creative_direction=direction or "（用户未提供具体方向）",
-        core_gameplay=core_gameplay,
-        long_mainline=long_mainline,
-        stage_roadmap=stage_roadmap,
-        world_knowledge=world_knowledge or "（未提供目标世界知识库）",
+    return run_step(
+        llm=llm,
+        folder="character_arcs_design",
+        label="角色成长线",
+        output_path=output_path,
+        prompt_vars=dict(
+            creative_direction=direction or "（用户未提供具体方向）",
+            core_gameplay=core_gameplay,
+            long_mainline=long_mainline,
+            stage_roadmap=stage_roadmap,
+            world_knowledge=world_knowledge or "（未提供目标世界知识库）",
+        ),
     )
-    result = normalize_text(llm.generate(prompt))
-    _write_file(output_path, result)
-    print(f"  -> 角色成长线已保存：{output_path}")
-    return result
 
 
 def gen_story_design(ws, force=False, creative_direction=None, direction_file=None):
@@ -528,102 +539,6 @@ def gen_novel_outline(ws, force=False, creative_direction=None, direction_file=N
     gen_novel_name_synopsis(ws, force=True)
 
     print(f"\n  -> 请审核编辑核心玩法、长线主线、舞台路线图和角色成长线后，再生成故事情节单元。")
-
-
-def _gen_novel_outline_single_ref(ws, llm, direction, preserved_content=None,
-                                  core_gameplay="", world_knowledge=""):
-    """单参考模式：使用核心玩法驱动生成新书全书设计。"""
-    reference_outline = load_reference_novel_outline(ws.reference_outlines)
-    if not reference_outline:
-        print("错误：未找到参考小说大纲。请先运行 outline_builder.py。")
-        return None
-
-    reference_worldview = _read_file(os.path.join(ws.file_system, "reference_worldview.md")) or "（未提取世界观，请先运行 worldview 命令）"
-
-    preserved_section = ""
-    if preserved_content:
-        preserved_section = f"【已有定稿中值得保留的大纲内容】\n以下内容来自已定稿章节的分析，重新生成大纲时必须保留这些内容的延续性：\n{preserved_content}"
-    world_knowledge_section = (
-        "【目标世界知识库】（可选，优先用于校正目标世界合理性）\n"
-        + world_knowledge
-        + "\n\n"
-        if world_knowledge
-        else ""
-    )
-
-    prompt = PromptLoader.load(
-        "adaptive_novel_outline",
-        core_gameplay=core_gameplay or "（未生成核心玩法，请基于参考小说和用户方向自行先内化玩法）",
-        reference_outline=reference_outline,
-        reference_worldview=reference_worldview,
-        inspirations="（无灵感库）",
-        creative_direction=direction or "（用户未提供具体方向，请自主发挥创意）",
-        world_knowledge_section=world_knowledge_section,
-        outline_rules=_load_outline_rules(ws),
-        preserved_content=preserved_section,
-    )
-    draft = normalize_text(llm.generate(prompt))
-    if not world_knowledge:
-        return draft
-
-    draft_path = os.path.join(ws.file_system, "adaptation", "novel_outline_draft.md")
-    _write_file(draft_path, draft)
-    print(f"  -> 新小说大纲初稿已保存：{draft_path}")
-    print(">>> 基于目标世界资料库校正新小说大纲 <<<")
-
-    adjust_prompt = PromptLoader.load(
-        "novel_outline_world_adjust",
-        creative_direction=direction or "（用户未提供具体方向，请自主发挥创意）",
-        core_gameplay=core_gameplay or "（未生成核心玩法）",
-        reference_worldview=reference_worldview,
-        reference_outline=reference_outline,
-        world_knowledge=world_knowledge,
-        outline_rules=_load_outline_rules(ws),
-        preserved_content=preserved_section,
-        draft_outline=draft,
-    )
-    return normalize_text(llm.generate(adjust_prompt))
-
-
-def _gen_new_novel_worldview_aggregated(ws, llm, force=False):
-    """基于新小说大纲 + 参考小说全书世界观，生成新小说全书世界观。"""
-    novel_outline = _read_file(os.path.join(ws.file_system, "novel_outline.md"))
-    if not novel_outline:
-        print("错误：未找到新小说大纲。")
-        return
-
-    ref_wv = _read_file(os.path.join(ws.file_system, "reference_worldview.md"))
-    if not ref_wv:
-        print("错误：未找到参考小说世界观。请先运行 worldview 命令。")
-        return
-
-    aggregated_path = os.path.join(ws.file_system, "new_novel_worldview.md")
-    existing = _read_file(aggregated_path)
-    if existing and not force:
-        print(f"新小说世界观已存在：{aggregated_path}")
-        print("使用 --force 覆盖。")
-        return
-
-    print(">>> 生成新小说全书世界观 <<<")
-    world_knowledge = _load_world_knowledge_optional(ws, "新小说全书世界观校正")
-    world_knowledge_section = (
-        "【目标世界知识库】（合理性校验优先级高于参考小说旧世界观）\n"
-        + world_knowledge
-        + "\n\n"
-        if world_knowledge
-        else ""
-    )
-
-    prompt = PromptLoader.load(
-        "new_novel_worldview",
-        core_gameplay=_read_file(_story_design_path(ws, "core_gameplay.md")) or "（未生成核心玩法文档）",
-        novel_outline=novel_outline,
-        world_knowledge_section=world_knowledge_section,
-        reference_worldview=ref_wv,
-    )
-    result = normalize_text(llm.generate(prompt))
-    _write_file(aggregated_path, result)
-    print(f"  -> 新小说全书世界观已保存：{aggregated_path}")
 
 
 def import_target_world_sources(ws, paths, force=False):
@@ -737,20 +652,21 @@ def gen_novel_name_synopsis(ws, force=False):
     if not llm:
         return
 
-    print(">>> 推荐书名与简介 <<<")
-
-    prompt = PromptLoader.load(
-        "novel_name_synopsis",
-        reference_name=ref_name,
-        reference_synopsis=ref_synopsis,
-        novel_outline=novel_outline,
-        worldview=worldview or "（未生成世界观）",
-        creative_direction=direction,
+    run_step(
+        llm=llm,
+        folder="novel_name_synopsis",
+        label="书名与简介",
+        header=">>> 推荐书名与简介 <<<",
+        write_guard=True,
+        output_path=output_path,
+        prompt_vars=dict(
+            reference_name=ref_name,
+            reference_synopsis=ref_synopsis,
+            novel_outline=novel_outline,
+            worldview=worldview or "（未生成世界观）",
+            creative_direction=direction,
+        ),
     )
-    result = normalize_text(llm.generate(prompt))
-    if result:
-        _write_file(output_path, result)
-        print(f"  -> 书名与简介已保存：{output_path}")
 
 
 def _stage_insert_backup_path(ws):
@@ -891,23 +807,24 @@ def _gen_volume_stage_plan(ws, vol_idx, llm, force, vol_outline, vol_worldview,
     assets = _load_story_design_assets(ws)
     rewrite_map = load_rewrite_map(ws, vol_idx)
 
-    print(f"  -> 生成卷{vol_idx}舞台计划...")
-    prompt = PromptLoader.load(
-        "volume_stage_plan",
-        volume_index=vol_idx,
-        core_gameplay=assets["core_gameplay"],
-        stage_roadmap=assets["stage_roadmap"],
-        character_arcs=assets["character_arcs"],
-        novel_outline=novel_outline or "（未生成新小说大纲）",
-        new_novel_worldview=new_novel_worldview or "（未生成新小说世界观）",
-        volume_outline=vol_outline or "（未生成本卷卷纲）",
-        volume_worldview=vol_worldview or "（未生成本卷世界观）",
-        rewrite_map=rewrite_map,
+    return run_step(
+        llm=llm,
+        folder="volume_stage_plan",
+        header=f"  -> 生成卷{vol_idx}舞台计划...",
+        save=f"  -> 卷{vol_idx}舞台计划已保存：{output_path}",
+        output_path=output_path,
+        prompt_vars=dict(
+            volume_index=vol_idx,
+            core_gameplay=assets["core_gameplay"],
+            stage_roadmap=assets["stage_roadmap"],
+            character_arcs=assets["character_arcs"],
+            novel_outline=novel_outline or "（未生成新小说大纲）",
+            new_novel_worldview=new_novel_worldview or "（未生成新小说世界观）",
+            volume_outline=vol_outline or "（未生成本卷卷纲）",
+            volume_worldview=vol_worldview or "（未生成本卷世界观）",
+            rewrite_map=rewrite_map,
+        ),
     )
-    result = normalize_text(llm.generate(prompt))
-    _write_file(output_path, result)
-    print(f"  -> 卷{vol_idx}舞台计划已保存：{output_path}")
-    return result
 
 
 def _gen_single_volume(ws, vol_idx, ref_volumes, force, creative_direction, llm, preserved_content=None):
@@ -1127,16 +1044,6 @@ def _story_pattern_path(ws, volume, arc_idx, start_ch, end_ch):
     )
 
 
-def _story_arc_audit_path(ws, volume, arc_idx, start_ch, end_ch, attempt):
-    return os.path.join(
-        ws.file_system,
-        "adaptation",
-        "story_arc_reasonability_audits",
-        f"vol_{volume:02d}",
-        f"arc_{arc_idx:03d}_ch{start_ch:03d}_{end_ch:03d}_attempt_{attempt}.json",
-    )
-
-
 def _arc_context_path(ws, volume):
     return os.path.join(
         ws.file_system,
@@ -1219,23 +1126,24 @@ def _build_arc_context(ws, llm, volume, total_chapters, vol_outline, vol_worldvi
     if not current_stage:
         current_stage = _read_file(_volume_stage_plan_path(ws, volume)) or "（未生成当前舞台计划）"
 
-    prompt = PromptLoader.load(
-        "arc_context_extract",
-        volume_index=volume,
-        total_chapters=total_chapters,
-        core_gameplay=assets["core_gameplay"],
-        long_mainline=assets["long_mainline"],
-        current_stage=current_stage,
-        stage_roadmap=assets["stage_roadmap"],
-        character_arcs=assets["character_arcs"],
-        mechanics_context=_load_mechanics_context(ws),
-        volume_outline=vol_outline,
-        volume_worldview=vol_worldview,
-        rewrite_map=rewrite_map or "（新流程不依赖换皮映射表；参考小说只提供叙事功能）",
+    return run_step(
+        llm=llm,
+        folder="arc_context_extract",
+        output_path=out_path,
+        prompt_vars=dict(
+            volume_index=volume,
+            total_chapters=total_chapters,
+            core_gameplay=assets["core_gameplay"],
+            long_mainline=assets["long_mainline"],
+            current_stage=current_stage,
+            stage_roadmap=assets["stage_roadmap"],
+            character_arcs=assets["character_arcs"],
+            mechanics_context=_load_mechanics_context(ws),
+            volume_outline=vol_outline,
+            volume_worldview=vol_worldview,
+            rewrite_map=rewrite_map or "（新流程不依赖换皮映射表；参考小说只提供叙事功能）",
+        ),
     )
-    result = normalize_text(llm.generate(prompt))
-    _write_file(out_path, result)
-    return result
 
 
 def _list_novel_story_arcs(ws, volume):
@@ -1573,69 +1481,24 @@ def _extract_story_pattern(ws, llm, volume, arc_idx, start_ch, end_ch,
     if existing and not force:
         return existing
 
-    prompt = PromptLoader.load(
-        "story_pattern_extract",
-        arc_context=arc_context,
-        arc_index=arc_idx,
-        start_chapter=start_ch,
-        end_chapter=end_ch,
-        reference_story_arc=reference_story_arc or "（无参考故事情节单元）",
+    return run_step(
+        llm=llm,
+        folder="story_pattern_extract",
+        output_path=out_path,
+        prompt_vars=dict(
+            arc_context=arc_context,
+            arc_index=arc_idx,
+            start_chapter=start_ch,
+            end_chapter=end_ch,
+            reference_story_arc=reference_story_arc or "（无参考故事情节单元）",
+        ),
     )
-    result = normalize_text(llm.generate(prompt))
-    _write_file(out_path, result)
-    return result
-
-
-def _audit_story_arc_reasonability(ws, llm, volume, arc_idx, start_ch, end_ch,
-                                   arc_context, previous_story_arc,
-                                   reference_story_arc, story_pattern,
-                                   story_arc, attempt):
-    """用模型审计新故事情节单元是否符合新书设定，且没有退回硬换皮。"""
-    prompt = PromptLoader.load(
-        "story_arc_reasonability_audit",
-        arc_context=arc_context,
-        arc_index=arc_idx,
-        start_chapter=start_ch,
-        end_chapter=end_ch,
-        previous_story_arc=previous_story_arc,
-        reference_story_arc=reference_story_arc or "（无参考故事情节单元）",
-        story_pattern=story_pattern,
-        story_arc=story_arc,
-    )
-    raw = normalize_text(llm.generate(prompt))
-    audit_path = _story_arc_audit_path(ws, volume, arc_idx, start_ch, end_ch, attempt)
-    _write_file(audit_path, raw)
-
-    try:
-        audit = parse_json_response(raw)
-    except Exception as e:
-        append_adaptation_report(
-            ws,
-            f"卷{volume}情节单元{arc_idx}合理性审计解析失败",
-            f"文件：{audit_path}\n错误：{e}",
-        )
-        return {
-            "pass": True,
-            "score": 0,
-            "violations": [],
-            "rewrite_instruction": "",
-        }
-
-    audit.setdefault("pass", True)
-    audit.setdefault("score", 0)
-    audit.setdefault("violations", [])
-    audit.setdefault("rewrite_instruction", "")
-    return audit
 
 
 def _generate_story_arc_with_audit(ws, llm, volume, arc_idx, start_ch, end_ch,
                                    arc_context, previous_story_arc,
                                    reference_story_arc, story_pattern):
-    """基于叙事模式生成新书故事情节单元。
-
-    合理性审计暂时关闭：保留 _audit_story_arc_reasonability 作为后续恢复入口，
-    但当前不生成 audit json、不根据审计结果重写。
-    """
+    """基于叙事模式生成新书故事情节单元。"""
     prompt = PromptLoader.load(
         "novel_story_arc",
         arc_context=arc_context,

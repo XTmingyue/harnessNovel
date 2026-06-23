@@ -45,6 +45,8 @@ WORLD_SECTIONS = [
 SECTION_LOOKUP = dict(WORLD_SECTIONS)
 
 
+# ── 路径工具 ──
+
 def _world_root(ws):
     return os.path.join(ws.file_system, "world_knowledge")
 
@@ -73,6 +75,8 @@ def _manifest_path(ws):
     return os.path.join(_world_root(ws), "manifest.json")
 
 
+# ── 文件 IO ──
+
 def _read_file(path):
     for encoding in ["utf-8", "utf-8-sig", "gb18030"]:
         try:
@@ -89,6 +93,20 @@ def _write_file(path, content):
     with open(path, "w", encoding="utf-8") as f:
         f.write(content.rstrip() + "\n")
 
+
+def _run_prompt(llm, folder, prompt_vars, output_path):
+    """加载 prompt → llm.generate → normalize_text → _write_file，返回 normalize 后内容。
+
+    纯生成+落盘。不含 print、不含 mtime 跳过、不读回文件。
+    print 顺序 / skip 分支 / 返回值语义(path vs content)由调用点保留。
+    """
+    prompt = PromptLoader.load(folder, **prompt_vars)
+    content = normalize_text(llm.generate(prompt))
+    _write_file(output_path, content)
+    return content
+
+
+# ── Manifest 与资料命名 ──
 
 def _load_manifest(ws):
     path = _manifest_path(ws)
@@ -175,6 +193,8 @@ def _canon_index_path(ws):
     return os.path.join(_world_root(ws), "canon_index.md")
 
 
+# ── 公共入口：导入资料 ──
+
 def import_world_sources(ws, paths, force=False):
     """Copy one or more target-world source files into the workspace."""
     os.makedirs(_imports_dir(ws), exist_ok=True)
@@ -234,6 +254,8 @@ def import_world_sources(ws, paths, force=False):
         "manifest": _manifest_path(ws),
     }
 
+
+# ── 文本切分 ──
 
 def _split_text(text, chunk_size):
     text = text.strip()
@@ -334,6 +356,8 @@ def _format_knowledge_items(items):
     )
 
 
+# ── 资料记录与角色 ──
+
 def _source_records(ws):
     manifest = _load_manifest(ws)
     records = []
@@ -431,6 +455,8 @@ def _assign_source_roles(records, primary_source=None):
     )
 
 
+# ── 栏目文档处理 ──
+
 def _render_section_document(section_name, content):
     content = (content or "").strip()
     if not content:
@@ -498,6 +524,8 @@ def _source_slices(record, chunk_size, chapter_batch_size):
     )
 
 
+# ── Cards 与基准索引 ──
+
 def _build_record_cards(ws, record, slices, llm, force=False, canon_index="", dependency_mtime=None):
     source_mtime = record.get("mtime") or os.path.getmtime(record["imported_path"])
     source_card_paths = []
@@ -516,19 +544,21 @@ def _build_record_cards(ws, record, slices, llm, force=False, canon_index="", de
             f"  结构化{record['role_label']}：{record['file_name']} "
             f"{source_slice['label']}（{idx}/{len(slices)}）"
         )
-        prompt = PromptLoader.load(
+        _run_prompt(
+            llm,
             "world_knowledge_extract",
-            source_name=record["file_name"],
-            source_role=record["role_label"],
-            canon_index=canon_index or "（无。当前资料为主资料，或尚未生成主资料基准索引。）",
-            slice_label=source_slice["label"],
-            slice_kind=source_slice["kind"],
-            chunk_index=idx,
-            chunk_count=len(slices),
-            source_text=source_slice["text"],
+            dict(
+                source_name=record["file_name"],
+                source_role=record["role_label"],
+                canon_index=canon_index or "（无。当前资料为主资料，或尚未生成主资料基准索引。）",
+                slice_label=source_slice["label"],
+                slice_kind=source_slice["kind"],
+                chunk_index=idx,
+                chunk_count=len(slices),
+                source_text=source_slice["text"],
+            ),
+            card_path,
         )
-        card = normalize_text(llm.generate(prompt))
-        _write_file(card_path, card)
     return source_card_paths
 
 
@@ -551,16 +581,20 @@ def _build_canon_index(ws, primary_record, primary_card_paths, llm, force=False)
         (os.path.basename(path), _read_file(path))
         for path in existing_cards
     ]
-    prompt = PromptLoader.load(
+    canon_index = _run_prompt(
+        llm,
         "world_canon_index",
-        source_name=primary_record["file_name"],
-        knowledge_cards=_format_knowledge_items(card_items),
+        dict(
+            source_name=primary_record["file_name"],
+            knowledge_cards=_format_knowledge_items(card_items),
+        ),
+        output_path,
     )
-    canon_index = normalize_text(llm.generate(prompt))
-    _write_file(output_path, canon_index)
     print(f"  -> 主资料基准索引已保存：{output_path}")
     return canon_index
 
+
+# ── 单资料全栏目汇总 ──
 
 def _write_sections_to_source(ws, record, section_documents):
     section_paths = {}
@@ -616,19 +650,20 @@ def _build_source_all_sections(ws, record, card_paths, llm, force=False):
             f"  汇总{record['role_label']}《{record['file_name']}》全栏目 "
             f"{step_index}/{total_steps}"
         )
-        prompt = PromptLoader.load(
+        current_summary = _run_prompt(
+            llm,
             "world_knowledge_merge_all_sections",
-            merge_task=(
-                f"资料级全栏目串行汇总：为{record['role_label']}《{record['file_name']}》"
-                "构建完整的7栏目资料知识库。本轮只读取2个新的资料卡片和上一轮阶段摘要；"
-                "请在同一资料内部去重、补充和纠错，不要与其他资料做主次裁决。"
+            dict(
+                merge_task=(
+                    f"资料级全栏目串行汇总：为{record['role_label']}《{record['file_name']}》"
+                    "构建完整的7栏目资料知识库。本轮只读取2个新的资料卡片和上一轮阶段摘要；"
+                    "请在同一资料内部去重、补充和纠错，不要与其他资料做主次裁决。"
+                ),
+                previous_summary=previous_summary,
+                knowledge_cards=_format_knowledge_items(card_items),
             ),
-            previous_summary=previous_summary,
-            knowledge_cards=_format_knowledge_items(card_items),
+            os.path.join(source_partials_dir, f"partial_{step_index:03d}.md"),
         )
-        current_summary = normalize_text(llm.generate(prompt))
-        partial_path = os.path.join(source_partials_dir, f"partial_{step_index:03d}.md")
-        _write_file(partial_path, current_summary)
         previous_summary = current_summary
 
     return _write_sections_to_source(ws, record, _split_sections_from_document(current_summary))
@@ -639,7 +674,6 @@ def _build_single_source_sections(ws, record, card_paths, llm, force=False, max_
     if not existing_cards:
         return None
 
-    _ = max_workers  # 当前单资料汇总采用全栏目单链；保留参数兼容 CLI。
     section_paths = _build_source_all_sections(ws, record, existing_cards, llm, force=force) or {}
 
     index_path = os.path.join(_source_world_dir(ws, record), "README.md")
@@ -681,11 +715,12 @@ def _load_existing_source_sections(ws, records):
     return source_items
 
 
+# ── 最终融合与审计 ──
+
 def _integrate_final_sections(ws, source_items, llm, force=False, max_workers=None):
     if not source_items:
         return None
 
-    _ = max_workers  # 当前最终融合采用全栏目单链；保留参数兼容 CLI。
     primary_item = next(
         (item for item in source_items if item["record"].get("role") == "primary"),
         source_items[0],
@@ -751,24 +786,22 @@ def _integrate_final_sections(ws, source_items, llm, force=False, max_workers=No
                 f"  整合最终知识库全栏目：{record['file_name']} "
                 f"{idx}/{len(supplement_items)}"
             )
-            prompt = PromptLoader.load(
+            current_summary = _run_prompt(
+                llm,
                 "world_knowledge_merge_all_sections",
-                merge_task=(
-                    "最终全栏目串行整合：已有阶段摘要是主资料7栏目知识库及已整合补充资料，"
-                    f"本轮只整合补充资料《{record['file_name']}》的7栏目知识库。"
-                    "故事主线、核心事件顺序、核心因果、基础身份关系以主资料为准。"
-                    "力量体系、技能体系、关键物品、角色实力/背景、世界观细节允许补充资料进行公共化校正和完善。"
-                    "排除补充资料原创主角线、原创金手指和原创主线任务。"
+                dict(
+                    merge_task=(
+                        "最终全栏目串行整合：已有阶段摘要是主资料7栏目知识库及已整合补充资料，"
+                        f"本轮只整合补充资料《{record['file_name']}》的7栏目知识库。"
+                        "故事主线、核心事件顺序、核心因果、基础身份关系以主资料为准。"
+                        "力量体系、技能体系、关键物品、角色实力/背景、世界观细节允许补充资料进行公共化校正和完善。"
+                        "排除补充资料原创主角线、原创金手指和原创主线任务。"
+                    ),
+                    previous_summary=current_summary,
+                    knowledge_cards=_aggregate_sections(supplement_paths),
                 ),
-                previous_summary=current_summary,
-                knowledge_cards=_aggregate_sections(supplement_paths),
+                os.path.join(final_all_partials_dir, f"integrated_{idx:03d}_{record['id']}.md"),
             )
-            current_summary = normalize_text(llm.generate(prompt))
-            partial_path = os.path.join(
-                final_all_partials_dir,
-                f"integrated_{idx:03d}_{record['id']}.md",
-            )
-            _write_file(partial_path, current_summary)
         _write_sections_to_final(ws, _split_sections_from_document(current_summary))
 
     legacy_path = os.path.join(_world_root(ws), "world_knowledge.md")
@@ -812,19 +845,23 @@ def _build_supplement_usage_audit(ws, source_items, llm, force=False):
         return output_path
 
     print("  审计补充资料利用情况...")
-    prompt = PromptLoader.load(
+    _run_prompt(
+        llm,
         "world_supplement_usage_audit",
-        primary_name=primary_item["record"].get("file_name", "主资料"),
-        supplement_names="、".join(item["record"].get("file_name", "补充资料") for item in supplement_items),
-        canon_index=_read_file(canon_path) if os.path.exists(canon_path) else "（无主资料基准索引）",
-        final_knowledge=_aggregate_sections(final_paths, max_chars=40000),
-        supplement_knowledge=_aggregate_sections(supplement_paths, max_chars=40000),
+        dict(
+            primary_name=primary_item["record"].get("file_name", "主资料"),
+            supplement_names="、".join(item["record"].get("file_name", "补充资料") for item in supplement_items),
+            canon_index=_read_file(canon_path) if os.path.exists(canon_path) else "（无主资料基准索引）",
+            final_knowledge=_aggregate_sections(final_paths, max_chars=40000),
+            supplement_knowledge=_aggregate_sections(supplement_paths, max_chars=40000),
+        ),
+        output_path,
     )
-    result = normalize_text(llm.generate(prompt))
-    _write_file(output_path, result)
     print(f"  -> 补充资料利用审计已保存：{output_path}")
     return output_path
 
+
+# ── 公共入口：构建知识库 ──
 
 def build_world_knowledge(ws, llm, force=False, chunk_size=12000, merge_chunk_size=50000,
                           chapter_batch_size=20, max_workers=None, primary_source=None,
@@ -937,6 +974,8 @@ def build_world_knowledge(ws, llm, force=False, chunk_size=12000, merge_chunk_si
         _build_supplement_usage_audit(ws, source_items, llm, force=force)
     return final_dir
 
+
+# ── 公共入口：加载上下文 ──
 
 def load_world_knowledge_context(ws, max_chars=80000):
     section_paths = _final_section_paths(ws)
