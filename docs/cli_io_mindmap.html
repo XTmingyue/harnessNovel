@@ -431,18 +431,28 @@
         </article>
         <article class="flow-node">
           <strong>novel-outline</strong>
-          <small>参考结构 + 灵感，若有目标资料则增强校正</small>
+          <small>先定玩法，再生成长线、舞台和角色线</small>
           <div class="artifacts">
             <span class="pill input">direction</span>
-            <span class="pill mid">novel_outline_draft.md</span>
-            <span class="pill output">novel_outline.md</span>
-            <span class="pill output">new_novel_worldview.md</span>
-            <span class="pill output">rewrite_map.md</span>
+            <span class="pill output">core_gameplay.md</span>
+            <span class="pill output">long_mainline.md</span>
+            <span class="pill output">stage_roadmap.md</span>
+            <span class="pill output">character_arcs.md</span>
+          </div>
+        </article>
+        <article class="flow-node">
+          <strong>mechanics-init</strong>
+          <small>可选：初始化系统/面板/数值/轻量状态追踪</small>
+          <div class="artifacts">
+            <span class="pill input">core_gameplay</span>
+            <span class="pill input">mechanics.md</span>
+            <span class="pill output">mechanics/profile.json</span>
+            <span class="pill output">mechanics/rules.json</span>
           </div>
         </article>
         <article class="flow-node">
           <strong>volume-outline</strong>
-          <small>生成每卷的新卷纲和卷世界观</small>
+          <small>旧流程兼容：生成每卷卷纲和卷世界观</small>
           <div class="artifacts">
             <span class="pill input">novel_outline.md</span>
             <span class="pill input">rewrite_map.md</span>
@@ -451,18 +461,25 @@
           </div>
         </article>
         <article class="flow-node">
-          <strong>chapter-outlines</strong>
-          <small>先生成批次摘要，再生成逐章章纲</small>
+          <strong>story-arcs</strong>
+          <small>生成新书故事情节单元和叙事模式</small>
           <div class="artifacts">
-            <span class="pill mid">adapted_reference_batches</span>
-            <span class="pill mid">batch audits</span>
-            <span class="pill output">outlines/vol_xx</span>
+            <span class="pill input">arc_context</span>
+            <span class="pill mid">story_patterns</span>
+            <span class="pill output">story_arcs</span>
+          </div>
+        </article>
+        <article class="flow-node">
+          <strong>chapter-outlines</strong>
+          <small>基于故事情节单元生成逐章章纲</small>
+          <div class="artifacts">
+            <span class="pill input">story_arcs</span>
             <span class="pill output">chapter_outlines</span>
           </div>
         </article>
         <article class="flow-node">
           <strong>write</strong>
-          <small>按章纲、批次摘要和参考正文节奏生成正文</small>
+          <small>按故事情节单元、章纲和参考正文节奏生成正文</small>
           <div class="artifacts">
             <span class="pill input">chapter_NNN.md</span>
             <span class="pill input">reference/chapters</span>
@@ -473,7 +490,7 @@
           <strong>name-synopsis</strong>
           <small>独立或由 novel-outline 自动触发</small>
           <div class="artifacts">
-            <span class="pill input">novel_outline.md</span>
+            <span class="pill input">story_design</span>
             <span class="pill output">novel_name_synopsis.md</span>
           </div>
         </article>
@@ -638,7 +655,7 @@
         <summary>
           <span class="summary-title">
             <strong><code>novel novel-outline 大罗 --direction "灵感"</code></strong>
-            <span>生成新书全书大纲、总世界观和换皮映射表</span>
+            <span>生成核心玩法、长线主线、舞台路线图和角色线</span>
           </span>
           <span class="chevron">›</span>
         </summary>
@@ -655,30 +672,80 @@
           <div class="branch">
             <div class="branch-label step">内部步骤</div>
             <ul>
-              <li>结合参考小说结构和用户灵感生成新书初版设计</li>
-              <li>如果存在目标世界知识库，则进行合理性调整；如果不存在，则自动跳过该步骤</li>
-              <li>输出最终全书大纲</li>
-              <li>根据全书大纲生成新书总世界观</li>
-              <li>根据新旧设定生成换皮映射表</li>
+              <li>先结合参考小说玩法循环和用户灵感生成核心玩法</li>
+              <li>围绕核心玩法生成独立的全书长线主线</li>
+              <li>按舞台为一级类目生成全书舞台路线图</li>
+              <li>基于核心玩法、长线主线和舞台路线图生成角色成长线</li>
+              <li>如果存在目标世界知识库，则校正目标世界合理性；如果不存在，则自动跳过该步骤</li>
               <li>自动生成书名简介</li>
             </ul>
           </div>
           <div class="branch">
             <div class="branch-label output">输出</div>
             <ul>
-              <li><code>file_system/adaptation/novel_outline_draft.md</code></li>
-              <li><code>file_system/novel_outline.md</code></li>
-              <li><code>file_system/new_novel_worldview.md</code></li>
-              <li><code>file_system/adaptation/rewrite_map.md</code></li>
+              <li><code>file_system/story_design/core_gameplay.md</code></li>
+              <li><code>file_system/story_design/long_mainline.md</code></li>
+              <li><code>file_system/story_design/stage_roadmap.md</code></li>
+              <li><code>file_system/story_design/character_arcs.md</code></li>
               <li><code>file_system/novel_name_synopsis.md</code></li>
             </ul>
           </div>
           <div class="branch">
             <div class="branch-label mid">下游</div>
             <ul>
-              <li><code>volume-outline</code> 读取全书大纲、总世界观和映射表</li>
-              <li><code>chapter-outlines</code> 读取全书大纲、总世界观和映射表做批次审计</li>
-              <li><code>write</code> 读取映射表和上游设计约束</li>
+              <li><code>stage-insert</code> 可基于灵感插入新舞台并更新舞台路线图</li>
+              <li><code>mechanics-init</code> 可基于核心玩法初始化可选机制层</li>
+              <li><code>story-arcs</code> 读取对应卷/舞台生成故事情节单元</li>
+              <li><code>write</code> 读取故事情节单元、章纲和舞台上下文</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <details class="command">
+        <summary>
+          <span class="summary-title">
+            <strong><code>novel mechanics-init 大罗 --file mechanics.md</code></strong>
+            <span>初始化可选机制层</span>
+          </span>
+          <span class="chevron">›</span>
+        </summary>
+        <div class="command-body">
+          <div class="branch">
+            <div class="branch-label input">输入</div>
+            <ul>
+              <li><code>--file</code> 机制设定文件，优先级最高</li>
+              <li><code>--direction</code> 或 <code>--direction-file</code> 机制方向</li>
+              <li><code>file_system/story_design/core_gameplay.md</code></li>
+              <li><code>file_system/story_design/long_mainline.md</code></li>
+              <li><code>file_system/story_design/stage_roadmap.md</code></li>
+              <li><code>file_system/story_design/character_arcs.md</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label step">内部步骤</div>
+            <ul>
+              <li>判断机制层模式：<code>none</code>、<code>light_state</code>、<code>explicit_mechanics</code></li>
+              <li>用户提供机制设定时优先遵守；否则根据核心玩法自动判断</li>
+              <li>生成规则、初始状态和展示边界</li>
+              <li><code>--none</code> 可显式关闭机制层</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label output">输出</div>
+            <ul>
+              <li><code>file_system/mechanics/profile.json</code></li>
+              <li><code>file_system/mechanics/design.md</code></li>
+              <li><code>file_system/mechanics/rules.json</code></li>
+              <li><code>file_system/mechanics/state.json</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label mid">下游</div>
+            <ul>
+              <li><code>story-arcs</code> 读取机制层边界到 <code>arc_context</code></li>
+              <li><code>chapter-outlines</code> 可输出机制事件草案，但不自行计算数值</li>
+              <li><code>write</code> 读取机制层状态和规则；未启用时自动忽略</li>
             </ul>
           </div>
         </div>
@@ -725,7 +792,8 @@
           <div class="branch">
             <div class="branch-label mid">下游</div>
             <ul>
-              <li><code>chapter-outlines</code> 用本卷大纲和本卷世界观生成批次摘要和章纲</li>
+              <li><code>story-arcs</code> 用本卷大纲和本卷世界观生成故事情节单元</li>
+              <li><code>chapter-outlines</code> 基于故事情节单元生成章纲</li>
               <li><code>write</code> 用本卷大纲和本卷世界观约束正文</li>
             </ul>
           </div>
@@ -735,8 +803,8 @@
       <details class="command">
         <summary>
           <span class="summary-title">
-            <strong><code>novel chapter-outlines 大罗 --volume 1</code></strong>
-            <span>先生成新批次摘要，再生成逐章章纲</span>
+            <strong><code>novel story-arcs 大罗 --volume 1</code></strong>
+            <span>生成新书故事情节单元</span>
           </span>
           <span class="chevron">›</span>
         </summary>
@@ -744,37 +812,85 @@
           <div class="branch">
             <div class="branch-label input">输入</div>
             <ul>
-              <li><code>file_system/novel_outline.md</code></li>
-              <li><code>file_system/new_novel_worldview.md</code></li>
-              <li><code>file_system/new_volume_outlines/vol_xx_outline.md</code></li>
-              <li><code>file_system/new_worldviews/vol_xx_worldview.md</code></li>
-              <li><code>file_system/adaptation/rewrite_map.md</code></li>
-              <li><code>reference/outlines/vol_xx_xxx/batch_001_020.md</code></li>
-              <li>前序新批次摘要和前两章章纲，如果存在</li>
+              <li><code>file_system/story_design/core_gameplay.md</code></li>
+              <li><code>file_system/story_design/long_mainline.md</code></li>
+              <li><code>file_system/story_design/stage_roadmap.md</code> 中的对应卷/舞台</li>
+              <li><code>file_system/story_design/character_arcs.md</code></li>
+              <li><code>file_system/mechanics</code>，如果已初始化</li>
+              <li><code>reference/outlines/vol_xx_xxx/story_arcs/arc_xxx.md</code></li>
+              <li>旧工作区可回退读取 <code>reference/outlines/vol_xx_xxx/batch_xxx.md</code></li>
+              <li>本阶段不读取 <code>reference/chapters</code> 正文</li>
             </ul>
           </div>
           <div class="branch">
             <div class="branch-label step">多步流程</div>
             <ul>
-              <li>步骤 A：预改写参考批次，生成新世界节奏草稿</li>
-              <li>步骤 B：基于预改写草稿生成正式新批次摘要</li>
-              <li>步骤 C：用 pro 模型做剧情合理性审计，失败则重写一次</li>
-              <li>步骤 D：基于正式批次摘要生成逐章章纲</li>
+              <li>从当前舞台的 <code>预计章节数</code> 推断本舞台总章数</li>
+              <li>按默认约 5 章一个单元规划新书故事情节单元</li>
+              <li>生成或复用当前舞台 <code>arc_context</code>，压缩玩法、长线、舞台、角色和机制层约束</li>
+              <li>默认选取一个参考故事情节作为叙事样本，并抽象为 <code>story_pattern</code></li>
+              <li>基于 <code>arc_context + story_pattern + 前序新书情节</code> 生成新书故事情节单元</li>
+              <li>写入故事情节索引，供章纲和正文阶段读取</li>
             </ul>
           </div>
           <div class="branch">
             <div class="branch-label output">输出</div>
             <ul>
-              <li><code>file_system/adaptation/adapted_reference_batches/vol_xx/batch_001_020.md</code></li>
-              <li><code>file_system/adaptation/batch_reasonability_audits/vol_xx/*.json</code></li>
-              <li><code>file_system/outlines/vol_xx/batch_001_020.md</code></li>
-              <li><code>file_system/chapter_outlines/vol_xx/chapter_001.md</code></li>
+              <li><code>file_system/adaptation/arc_contexts/vol_xx_context.md</code></li>
+              <li><code>file_system/adaptation/story_patterns/vol_xx/arc_xxx.md</code></li>
+              <li><code>file_system/story_arcs/vol_xx/arc_xxx_ch001_005.md</code></li>
+              <li><code>file_system/story_arcs/vol_xx/arcs_index.json</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label mid">语义说明</div>
+            <ul>
+              <li>日志中的参考章节范围表示“叙事模式来源”，不是新书章节与参考章节的一一对应</li>
+              <li><code>story_pattern</code> 只保留情节功能、冲突结构、情绪节奏、爽点机制和钩子方式</li>
+              <li>当前流程中一卷对应一个舞台；<code>--stage</code> 只是 <code>--volume</code> 的兼容别名，不表示卷内 stage</li>
             </ul>
           </div>
           <div class="branch">
             <div class="branch-label mid">下游</div>
             <ul>
-              <li><code>file_system/outlines</code> 作为正文生成的批次背景</li>
+              <li><code>file_system/story_arcs</code> 作为章纲生成的情节蓝图</li>
+              <li><code>file_system/story_arcs</code> 也会作为正文生成的情节背景</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
+      <details class="command">
+        <summary>
+          <span class="summary-title">
+            <strong><code>novel chapter-outlines 大罗 --volume 1</code></strong>
+            <span>基于故事情节单元生成逐章章纲</span>
+          </span>
+          <span class="chevron">›</span>
+        </summary>
+        <div class="command-body">
+          <div class="branch">
+            <div class="branch-label input">输入</div>
+            <ul>
+              <li><code>file_system/story_arcs/vol_xx/arc_xxx.md</code></li>
+              <li><code>file_system/story_design/stage_roadmap.md</code> 中的对应卷/舞台</li>
+              <li><code>file_system/mechanics</code>，如果已初始化</li>
+              <li>前两章章纲，如果存在</li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label step">内部步骤</div>
+            <ul>
+              <li>读取已生成的故事情节单元</li>
+              <li>读取机制层；启用时章纲可输出机制事件草案，但不自行计算最终数值</li>
+              <li>按故事情节单元覆盖的章节范围逐章生成章纲</li>
+              <li>每章读取前两章章纲，保持小范围连续性</li>
+              <li>如果故事情节单元缺失，会提示先运行 <code>story-arcs</code></li>
+            </ul>
+          </div>
+          <div class="branch">
+            <div class="branch-label output">输出</div>
+            <ul>
               <li><code>file_system/chapter_outlines</code> 作为正文生成的直接蓝图</li>
             </ul>
           </div>
@@ -794,10 +910,13 @@
             <div class="branch-label input">输入</div>
             <ul>
               <li><code>file_system/chapter_outlines/vol_xx/chapter_NNN.md</code></li>
-              <li><code>file_system/outlines/vol_xx/batch_XXX_YYY.md</code></li>
-              <li><code>file_system/new_volume_outlines/vol_xx_outline.md</code></li>
-              <li><code>file_system/new_worldviews/vol_xx_worldview.md</code></li>
-              <li><code>file_system/adaptation/rewrite_map.md</code></li>
+              <li><code>file_system/story_arcs/vol_xx/arc_xxx.md</code></li>
+              <li><code>file_system/story_design/stage_roadmap.md</code> 中的对应卷/舞台</li>
+              <li><code>file_system/story_design/long_mainline.md</code></li>
+              <li><code>file_system/mechanics</code>，如果已初始化</li>
+              <li>旧工作区可回退读取 <code>file_system/outlines/vol_xx/batch_XXX_YYY.md</code></li>
+              <li>旧工作区可回退读取 <code>file_system/new_volume_outlines/vol_xx_outline.md</code> 和 <code>file_system/new_worldviews/vol_xx_worldview.md</code></li>
+              <li>旧工作区可选读取 <code>file_system/adaptation/rewrite_map.md</code></li>
               <li><code>reference/chapters</code> 中按比例匹配的参考章节</li>
               <li>前两章正文，如果存在</li>
               <li><code>core/system_prompt.md</code> 和 <code>core/agents.md</code></li>
@@ -807,7 +926,7 @@
             <div class="branch-label step">内部步骤</div>
             <ul>
               <li>确定要生成的章节范围，支持 <code>--start</code> 和 <code>--max</code></li>
-              <li>读取章纲、批次摘要、卷纲、卷世界观、映射表</li>
+              <li>读取章纲、故事情节单元、当前舞台、长线边界和机制层约束</li>
               <li>读取对应参考章节作为节奏和写法样本</li>
               <li>调用正文生成模型</li>
               <li>写入章节正文</li>
@@ -823,8 +942,8 @@
           <div class="branch">
             <div class="branch-label risk">注意点</div>
             <ul>
-              <li>正文阶段仍会直接读取参考章节文本，参考污染风险没有完全消失</li>
-              <li>当前正文阶段仍存在静态残留扫描逻辑，后续可按你的新思路继续收敛</li>
+              <li>正文阶段仍会读取参考章节文本作为写法样本，需要依赖章纲和当前舞台约束避免照搬</li>
+              <li>静态关键词残留扫描已停用；后续若恢复审计，应改为剧情合理性审计</li>
             </ul>
           </div>
         </div>
@@ -842,15 +961,17 @@
           <div class="branch">
             <div class="branch-label input">输入</div>
             <ul>
-              <li><code>file_system/novel_outline.md</code></li>
-              <li><code>file_system/new_novel_worldview.md</code></li>
+              <li><code>file_system/story_design/core_gameplay.md</code></li>
+              <li><code>file_system/story_design/long_mainline.md</code></li>
+              <li><code>file_system/story_design/stage_roadmap.md</code></li>
+              <li><code>file_system/story_design/character_arcs.md</code></li>
               <li><code>creative_direction.md</code></li>
             </ul>
           </div>
           <div class="branch">
             <div class="branch-label step">内部步骤</div>
             <ul>
-              <li>根据全书大纲、世界观和灵感生成书名、简介、卖点</li>
+              <li>根据核心玩法、长线主线、舞台路线图、角色线和灵感生成书名、简介、卖点</li>
               <li><code>novel-outline</code> 当前会自动触发一次本能力</li>
             </ul>
           </div>
@@ -869,19 +990,27 @@
       <div class="chain-grid">
         <article class="chain-card">
           <h3>参考小说链</h3>
-          <p><code>sample_novel.txt</code> → <code>reference/chapters</code> + <code>reference/outlines</code> → 新书结构、批次节奏、正文节奏。</p>
+          <p><code>sample_novel.txt</code> → <code>reference/chapters</code> + <code>reference/outlines</code> → 新书结构、故事情节节奏、正文节奏。</p>
         </article>
         <article class="chain-card">
           <h3>目标世界链</h3>
-          <p>可选增强链：<code>world-import</code> → <code>world-build</code> → <code>worlds/_final/*.md</code> → 新书大纲合理性调整。没有这条链时，<code>novel-outline</code> 会自动降级。</p>
+          <p>可选增强链：<code>world-import</code> → <code>world-build</code> → <code>worlds/_final/*.md</code> → 核心玩法、长线主线、舞台路线和角色线合理性调整。没有这条链时，<code>novel-outline</code> 会自动降级。</p>
         </article>
         <article class="chain-card">
-          <h3>换皮约束链</h3>
-          <p><code>novel_outline.md</code> + <code>new_novel_worldview.md</code> → <code>rewrite_map.md</code> → 分卷、批次、正文。</p>
+          <h3>舞台设计链</h3>
+          <p><code>core_gameplay.md</code> → <code>long_mainline.md</code> → <code>stage_roadmap.md</code> + <code>character_arcs.md</code> → 故事情节单元。</p>
+        </article>
+        <article class="chain-card">
+          <h3>叙事模式链</h3>
+          <p><code>reference story arcs</code> + <code>arc_context</code> → <code>story_pattern</code> → <code>new story arc</code>。参考情节只提供结构功能和情绪节奏。</p>
+        </article>
+        <article class="chain-card">
+          <h3>机制层链</h3>
+          <p>可选链：<code>mechanics-init</code> → <code>mechanics/profile.json</code> + <code>rules.json</code> + <code>state.json</code> → 情节、章纲和正文的状态约束。</p>
         </article>
         <article class="chain-card">
           <h3>正文生成链</h3>
-          <p><code>batch summary</code> → <code>chapter outline</code> → <code>chapter text</code>，其中正文仍会参考原书章节文本。</p>
+          <p><code>story arc</code> → <code>chapter outline</code> → <code>chapter text</code>，其中正文仍会参考原书章节文本。</p>
         </article>
       </div>
     </section>
@@ -890,8 +1019,8 @@
       <h2 class="section-title" style="margin-top:0">当前流程风险点</h2>
       <div class="risk-list">
         <div class="risk-item">目标世界资料库是可选增强；如果 <code>world-build</code> 晚于 <code>novel-outline</code> 执行，目标世界资料不会自动进入既有大纲，需要重新跑 <code>novel novel-outline --force</code>。</div>
-        <div class="risk-item"><code>novel-outline</code> 同时负责全书大纲、世界观、映射表、书名简介，职责较重，任一中间产物污染都会向后传播。</div>
-        <div class="risk-item"><code>chapter-outlines</code> 同时生成批次摘要和章纲。若只想重跑合理性审计，目前没有独立命令。</div>
+        <div class="risk-item"><code>novel-outline</code> 会先生成核心玩法，再生成长线主线、舞台路线图和角色线；如果核心玩法偏了，后续舞台和情节都会被带偏。</div>
+        <div class="risk-item"><code>story-arcs</code> 和 <code>chapter-outlines</code> 已拆分；重跑情节单元会影响后续章纲，需要按顺序重新生成。</div>
         <div class="risk-item"><code>write</code> 阶段仍读取参考正文，若 prompt 约束不足，旧世界细节可能重新进入正文。</div>
       </div>
     </section>

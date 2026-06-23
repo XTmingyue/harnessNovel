@@ -1,6 +1,7 @@
 import sys
 import os
 import re
+import json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -12,7 +13,6 @@ from core.workspace import init_workspace
 from core.adaptation import (
     append_adaptation_report,
     format_forbidden_terms,
-    load_forbidden_terms,
     load_rewrite_map,
     scan_forbidden_terms,
 )
@@ -23,12 +23,14 @@ from core.world_knowledge import (
 )
 from training.reference_finder import (
     list_reference_volumes,
+    list_reference_story_arcs,
     load_reference_novel_outline,
     load_reference_volume_outline,
-    find_reference_batch,
 )
 
 BATCH_SIZE = 20
+STORY_ARC_FILE_RE = re.compile(r'^arc_(\d+)_ch(\d+)_(\d+)\.md$')
+STORY_ARC_TARGET_CHAPTERS = 5
 
 
 def _get_llm():
@@ -42,7 +44,7 @@ def _get_llm():
 
 
 def _get_lite_llm():
-    """获取辅助任务 LLM（flash 模型）：世界观、映射表、灵感筛选、书名简介。"""
+    """获取辅助任务 LLM（flash 模型）：世界观、资料库、灵感筛选、书名简介。"""
     config = ConfigLoader.get_adaptive_builder_lite_config()
     if not config:
         config = ConfigLoader.get_adaptive_builder_config()
@@ -85,18 +87,28 @@ def _write_file(path, content):
         f.write(content + "\n")
 
 
-def _audit_text(ws, label, text, forbidden_terms, exempt_line_patterns=None):
-    """轻量审计生成文本中的参考元素残留，返回违规词列表。"""
-    violations = scan_forbidden_terms(
-        text,
-        forbidden_terms,
-        exempt_line_patterns=exempt_line_patterns,
-    )
-    if violations:
-        msg = f"{label} 检测到疑似参考元素残留：{', '.join(violations)}"
-        print(f"  警告：{msg}")
-        append_adaptation_report(ws, label, msg)
-    return violations
+def run_step(*, llm, folder, prompt_vars, output_path, label=None,
+             header=None, save=None, write_guard=False):
+    """核心生成三联：load→generate→normalize→write，可选 header/save 打印。
+
+    label 同时作为 header/save 的派生基础（默认 header=">>> 生成{label} <<<"，
+    save="  -> {label}已保存：{output_path}"，冒号为全角）；显式传入 header/save
+    则覆盖派生。label=None 且不传 header/save 时静默（无打印）。
+    write_guard=True 时仅在 result 非空时写盘与打印 save。
+    """
+    if label is not None and header is None:
+        header = f">>> 生成{label} <<<"
+    if label is not None and save is None:
+        save = f"  -> {label}已保存：{output_path}"
+    if header is not None:
+        print(header)
+    prompt = PromptLoader.load(folder, **prompt_vars)
+    result = normalize_text(llm.generate(prompt))
+    if result or not write_guard:
+        _write_file(output_path, result)
+    if save is not None and (result or not write_guard):
+        print(save)
+    return result
 
 
 def _load_creative_direction(ws, cli_input=None, direction_file=None):
@@ -143,19 +155,20 @@ def _gen_rewrite_map(ws, llm, force=False):
         print("  警告：参考大纲或新小说大纲缺失，暂不生成换皮映射表。")
         return ""
 
-    print(">>> 生成全书换皮映射表 <<<")
-    prompt = PromptLoader.load(
-        "rewrite_map_extract",
-        reference_outline=reference_outline,
-        reference_worldview=reference_worldview or "（未提取参考世界观）",
-        novel_outline=novel_outline,
-        new_novel_worldview=new_worldview or "（未生成新小说世界观）",
+    return run_step(
+        llm=llm,
+        folder="rewrite_map_extract",
+        label="全书换皮映射表",
+        save=f"  -> 换皮映射表已保存：{output_path}",
+        write_guard=True,
+        output_path=output_path,
+        prompt_vars=dict(
+            reference_outline=reference_outline,
+            reference_worldview=reference_worldview or "（未提取参考世界观）",
+            novel_outline=novel_outline,
+            new_novel_worldview=new_worldview or "（未生成新小说世界观）",
+        ),
     )
-    result = normalize_text(llm.generate(prompt))
-    if result:
-        _write_file(output_path, result)
-        print(f"  -> 换皮映射表已保存：{output_path}")
-    return result
 
 
 def _ensure_rewrite_map(ws, llm):
@@ -166,16 +179,343 @@ def _ensure_rewrite_map(ws, llm):
     _gen_rewrite_map(ws, llm, force=False)
 
 
-def gen_novel_outline(ws, force=False, creative_direction=None, direction_file=None, preserved_content=None):
-    """Step 1: 仿写生成新小说大纲（含按卷世界观）。"""
-    output_path = os.path.join(ws.file_system, "novel_outline.md")
-    existing = _read_file(output_path)
-    if existing and not force:
-        print(f"新小说大纲已存在：{output_path}")
-        print("使用 --force 覆盖，或手动编辑现有文件。")
+def _story_design_dir(ws):
+    return os.path.join(ws.file_system, "story_design")
+
+
+def _story_design_path(ws, name):
+    return os.path.join(_story_design_dir(ws), name)
+
+
+def _volume_stage_plan_path(ws, vol_idx):
+    return os.path.join(_story_design_dir(ws), "stages", f"vol_{vol_idx:02d}_stage.md")
+
+
+def _load_story_design_assets(ws):
+    return {
+        "core_gameplay": _read_file(_story_design_path(ws, "core_gameplay.md")) or "（未生成核心玩法文档）",
+        "long_mainline": _read_file(_story_design_path(ws, "long_mainline.md")) or "（未生成全书长线主线）",
+        "stage_roadmap": _read_file(_story_design_path(ws, "stage_roadmap.md")) or "（未生成舞台路线图）",
+        "character_arcs": _read_file(_story_design_path(ws, "character_arcs.md")) or "（未生成角色成长线）",
+    }
+
+
+def _mechanics_dir(ws):
+    return os.path.join(ws.file_system, "mechanics")
+
+
+def _mechanics_path(ws, name):
+    return os.path.join(_mechanics_dir(ws), name)
+
+
+def _write_json_file(path, data):
+    _write_file(path, json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _read_json_file(path):
+    content = _read_file(path)
+    if not content:
+        return None
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        return None
+
+
+def _default_mechanics_disabled(reason):
+    return {
+        "profile": {
+            "mode": "none",
+            "enabled": False,
+            "visible_panel": False,
+            "precision": "none",
+            "type": "none",
+            "reason": reason,
+            "tracked_domains": [],
+        },
+        "design": reason,
+        "rules": {
+            "version": 1,
+            "mode": "none",
+            "event_types": [],
+            "display": {
+                "panel_enabled": False,
+                "panel_name": "",
+                "chapter_panel_sections": [],
+            },
+            "constraints": ["本小说不启用机制层；章纲和正文不得强行加入系统面板。"],
+        },
+        "state": {
+            "version": 1,
+            "mode": "none",
+            "chapter": 0,
+            "values": {},
+            "inventory": {},
+            "skills": {},
+            "tasks": {},
+            "relationships": {},
+            "flags": {},
+        },
+    }
+
+
+def _normalize_mechanics_payload(payload):
+    if not isinstance(payload, dict):
+        payload = _default_mechanics_disabled("LLM 未返回有效机制层 JSON，默认关闭。")
+
+    profile = payload.get("profile") if isinstance(payload.get("profile"), dict) else {}
+    mode = profile.get("mode") or payload.get("mode") or "none"
+    if mode not in {"none", "light_state", "explicit_mechanics"}:
+        mode = "none"
+
+    enabled = mode != "none"
+    visible_panel = bool(profile.get("visible_panel")) if enabled else False
+    precision = profile.get("precision") or ("strict" if mode == "explicit_mechanics" else ("loose" if mode == "light_state" else "none"))
+    mechanics_type = profile.get("type") or ("state_tracking" if mode == "light_state" else ("system_panel" if mode == "explicit_mechanics" else "none"))
+    tracked_domains = profile.get("tracked_domains")
+    if not isinstance(tracked_domains, list):
+        tracked_domains = []
+
+    normalized = {
+        "profile": {
+            "mode": mode,
+            "enabled": enabled,
+            "visible_panel": visible_panel,
+            "precision": precision,
+            "type": mechanics_type,
+            "reason": profile.get("reason") or payload.get("reason") or "",
+            "tracked_domains": tracked_domains,
+        },
+        "design": payload.get("design") if isinstance(payload.get("design"), str) else "",
+        "rules": payload.get("rules") if isinstance(payload.get("rules"), dict) else {},
+        "state": payload.get("state") if isinstance(payload.get("state"), dict) else {},
+    }
+    normalized["rules"].setdefault("version", 1)
+    normalized["rules"].setdefault("mode", mode)
+    normalized["rules"].setdefault("event_types", [])
+    normalized["rules"].setdefault("display", {})
+    normalized["rules"]["display"].setdefault("panel_enabled", visible_panel)
+    normalized["rules"]["display"].setdefault("panel_name", "")
+    normalized["rules"]["display"].setdefault("chapter_panel_sections", [])
+    normalized["rules"].setdefault("constraints", [])
+    normalized["state"].setdefault("version", 1)
+    normalized["state"].setdefault("mode", mode)
+    normalized["state"].setdefault("chapter", 0)
+    for key in ["values", "inventory", "skills", "tasks", "relationships", "flags"]:
+        normalized["state"].setdefault(key, {})
+    return normalized
+
+
+def _write_mechanics_payload(ws, payload):
+    os.makedirs(_mechanics_dir(ws), exist_ok=True)
+    _write_json_file(_mechanics_path(ws, "profile.json"), payload["profile"])
+    _write_file(_mechanics_path(ws, "design.md"), payload["design"] or "（无机制层设计说明）")
+    _write_json_file(_mechanics_path(ws, "rules.json"), payload["rules"])
+    _write_json_file(_mechanics_path(ws, "state.json"), payload["state"])
+
+
+def _load_mechanics_context(ws):
+    profile = _read_json_file(_mechanics_path(ws, "profile.json"))
+    if not profile or not profile.get("enabled"):
+        return "（未启用机制层。章纲和正文不需要系统面板。）"
+
+    design = _read_file(_mechanics_path(ws, "design.md")) or ""
+    rules = _read_file(_mechanics_path(ws, "rules.json")) or "{}"
+    state = _read_file(_mechanics_path(ws, "state.json")) or "{}"
+    return (
+        "【机制层 profile】\n"
+        + json.dumps(profile, ensure_ascii=False, indent=2)
+        + "\n\n【机制层设计】\n"
+        + design
+        + "\n\n【机制层规则】\n"
+        + rules
+        + "\n\n【当前机制状态】\n"
+        + state
+    )
+
+
+def init_mechanics(ws, force=False, creative_direction=None, direction_file=None,
+                   mechanics_file=None, disable=False):
+    """初始化可选机制层：none / light_state / explicit_mechanics。"""
+    profile_path = _mechanics_path(ws, "profile.json")
+    if os.path.exists(profile_path) and not force:
+        print(f"机制层已存在：{profile_path}")
+        print("使用 --force 覆盖。")
         return
 
-    print(">>> 仿写生成新小说大纲 <<<")
+    if disable:
+        payload = _default_mechanics_disabled("用户显式关闭机制层。")
+        _write_mechanics_payload(ws, payload)
+        print(f"  -> 已关闭机制层：{profile_path}")
+        return
+
+    direction = _load_creative_direction(ws, creative_direction, direction_file)
+    mechanics_source = ""
+    if mechanics_file:
+        mechanics_source = _read_file(mechanics_file) or ""
+        if not mechanics_source:
+            print(f"错误：机制设定文件不存在或为空：{mechanics_file}")
+            return
+    elif creative_direction:
+        mechanics_source = creative_direction
+
+    assets = _load_story_design_assets(ws)
+    llm = _get_llm()
+    if not llm:
+        return
+
+    print(">>> 初始化机制层 mechanics <<<")
+    if mechanics_source:
+        print(f"  -> 已加载用户机制设定（{len(mechanics_source)} 字）")
+    else:
+        print("  -> 未提供用户机制设定，将根据核心玩法自动判断是否启用机制层。")
+
+    prompt = PromptLoader.load(
+        "mechanics_init",
+        mechanics_source=mechanics_source or "（用户未提供机制设定）",
+        creative_direction=direction or "（无额外创作方向）",
+        core_gameplay=assets["core_gameplay"],
+        long_mainline=assets["long_mainline"],
+        stage_roadmap=assets["stage_roadmap"],
+        character_arcs=assets["character_arcs"],
+    )
+    raw = normalize_text(llm.generate(prompt))
+    try:
+        payload = parse_json_response(raw)
+    except Exception as exc:
+        print(f"  警告：机制层 JSON 解析失败，默认关闭。原因：{exc}")
+        payload = _default_mechanics_disabled("机制层初始化 JSON 解析失败，默认关闭。")
+        payload["design"] += "\n\n# 原始返回\n" + raw
+
+    payload = _normalize_mechanics_payload(payload)
+    _write_mechanics_payload(ws, payload)
+    print(f"  -> 机制层 profile 已保存：{_mechanics_path(ws, 'profile.json')}")
+    print(f"  -> 机制层设计已保存：{_mechanics_path(ws, 'design.md')}")
+    print(f"  -> 机制层规则已保存：{_mechanics_path(ws, 'rules.json')}")
+    print(f"  -> 机制层状态已保存：{_mechanics_path(ws, 'state.json')}")
+    print(f"  -> 机制层模式：{payload['profile']['mode']}")
+
+
+def _gen_core_gameplay(ws, llm, direction, world_knowledge, force=False):
+    output_path = _story_design_path(ws, "core_gameplay.md")
+    existing = _read_file(output_path)
+    if existing and not force:
+        print(f"核心玩法文档已存在：{output_path}")
+        return existing
+
+    reference_outline = load_reference_novel_outline(ws.reference_outlines)
+    reference_worldview = _read_file(os.path.join(ws.file_system, "reference_worldview.md")) or "（未提取参考世界观）"
+
+    return run_step(
+        llm=llm,
+        folder="core_gameplay_design",
+        label="核心玩法文档",
+        output_path=output_path,
+        prompt_vars=dict(
+            creative_direction=direction or "（用户未提供具体方向）",
+            reference_outline=reference_outline or "（无参考小说全书大纲）",
+            reference_worldview=reference_worldview,
+            world_knowledge=world_knowledge or "（未提供目标世界知识库）",
+            outline_rules=_load_outline_rules(ws),
+        ),
+    )
+
+
+def _gen_long_mainline(ws, llm, direction, world_knowledge, force=False):
+    output_path = _story_design_path(ws, "long_mainline.md")
+    existing = _read_file(output_path)
+    if existing and not force:
+        print(f"全书长线主线已存在：{output_path}")
+        return existing
+
+    reference_outline = load_reference_novel_outline(ws.reference_outlines)
+    reference_worldview = _read_file(os.path.join(ws.file_system, "reference_worldview.md")) or "（未提取参考世界观）"
+    core_gameplay = _read_file(_story_design_path(ws, "core_gameplay.md")) or "（未生成核心玩法文档）"
+
+    return run_step(
+        llm=llm,
+        folder="long_mainline_design",
+        label="全书长线主线",
+        output_path=output_path,
+        prompt_vars=dict(
+            creative_direction=direction or "（用户未提供具体方向）",
+            core_gameplay=core_gameplay,
+            reference_outline=reference_outline or "（无参考小说全书大纲）",
+            reference_worldview=reference_worldview,
+            world_knowledge=world_knowledge or "（未提供目标世界知识库）",
+        ),
+    )
+
+
+def _gen_stage_roadmap(ws, llm, direction, world_knowledge, force=False):
+    output_path = _story_design_path(ws, "stage_roadmap.md")
+    existing = _read_file(output_path)
+    if existing and not force:
+        print(f"舞台路线图已存在：{output_path}")
+        return existing
+
+    core_gameplay = _read_file(_story_design_path(ws, "core_gameplay.md")) or "（未生成核心玩法文档）"
+    long_mainline = _read_file(_story_design_path(ws, "long_mainline.md")) or "（未生成全书长线主线）"
+
+    return run_step(
+        llm=llm,
+        folder="stage_roadmap_design",
+        label="全书舞台路线图",
+        save=f"  -> 舞台路线图已保存：{output_path}",
+        output_path=output_path,
+        prompt_vars=dict(
+            creative_direction=direction or "（用户未提供具体方向）",
+            core_gameplay=core_gameplay,
+            long_mainline=long_mainline,
+            world_knowledge=world_knowledge or "（未提供目标世界知识库）",
+        ),
+    )
+
+
+def _gen_character_arcs(ws, llm, direction, world_knowledge, force=False):
+    output_path = _story_design_path(ws, "character_arcs.md")
+    existing = _read_file(output_path)
+    if existing and not force:
+        print(f"角色成长线已存在：{output_path}")
+        return existing
+
+    core_gameplay = _read_file(_story_design_path(ws, "core_gameplay.md")) or "（未生成核心玩法文档）"
+    long_mainline = _read_file(_story_design_path(ws, "long_mainline.md")) or "（未生成全书长线主线）"
+    stage_roadmap = _read_file(_story_design_path(ws, "stage_roadmap.md")) or "（未生成舞台路线图）"
+
+    return run_step(
+        llm=llm,
+        folder="character_arcs_design",
+        label="角色成长线",
+        output_path=output_path,
+        prompt_vars=dict(
+            creative_direction=direction or "（用户未提供具体方向）",
+            core_gameplay=core_gameplay,
+            long_mainline=long_mainline,
+            stage_roadmap=stage_roadmap,
+            world_knowledge=world_knowledge or "（未提供目标世界知识库）",
+        ),
+    )
+
+
+def gen_story_design(ws, force=False, creative_direction=None, direction_file=None):
+    """生成长篇网文的玩法、长线主线、舞台和角色线设计资产。"""
+    llm = _get_llm()
+    if not llm:
+        return
+
+    direction = _load_creative_direction(ws, creative_direction, direction_file)
+    world_knowledge = _load_world_knowledge_optional(ws, "故事玩法/舞台/角色线设计")
+
+    _gen_core_gameplay(ws, llm, direction, world_knowledge, force=force)
+    _gen_long_mainline(ws, llm, direction, world_knowledge, force=force)
+    _gen_stage_roadmap(ws, llm, direction, world_knowledge, force=force)
+    _gen_character_arcs(ws, llm, direction, world_knowledge, force=force)
+
+
+def gen_novel_outline(ws, force=False, creative_direction=None, direction_file=None, preserved_content=None):
+    """生成核心玩法、全书长线主线、舞台路线图和角色成长线。"""
+    print(">>> 生成核心玩法与全书舞台设计 <<<")
 
     direction = _load_creative_direction(ws, creative_direction, direction_file)
     if direction:
@@ -188,111 +528,17 @@ def gen_novel_outline(ws, force=False, creative_direction=None, direction_file=N
     if not llm:
         return
 
-    print(">>> 调用 LLM 生成大纲 <<<")
-    result = _gen_novel_outline_single_ref(ws, llm, direction, preserved_content=preserved_content)
+    world_knowledge = _load_world_knowledge_optional(ws, "核心玩法与舞台设计")
+    _gen_core_gameplay(ws, llm, direction, world_knowledge, force=force)
+    _gen_long_mainline(ws, llm, direction, world_knowledge, force=force)
+    _gen_stage_roadmap(ws, llm, direction, world_knowledge, force=force)
+    _gen_character_arcs(ws, llm, direction, world_knowledge, force=force)
 
-    if result:
-        _write_file(output_path, result)
-        print(f"  -> 新小说大纲已保存：{output_path}")
+    # 推荐书名与简介
+    print()
+    gen_novel_name_synopsis(ws, force=True)
 
-        # 自动生成新小说全书世界观
-        print()
-        _gen_new_novel_worldview_aggregated(ws, llm)
-
-        # 生成后续阶段共用的换皮映射表
-        print()
-        _gen_rewrite_map(ws, llm, force=force)
-
-        # 推荐书名与简介
-        print()
-        gen_novel_name_synopsis(ws, force=True)
-
-        print(f"\n  -> 请审核编辑大纲和世界观后，再进行卷纲生成。")
-
-
-def _gen_novel_outline_single_ref(ws, llm, direction, preserved_content=None):
-    """单参考模式：使用 adaptive_novel_outline 提示词。"""
-    reference_outline = load_reference_novel_outline(ws.reference_outlines)
-    if not reference_outline:
-        print("错误：未找到参考小说大纲。请先运行 outline_builder.py。")
-        return None
-
-    reference_worldview = _read_file(os.path.join(ws.file_system, "reference_worldview.md")) or "（未提取世界观，请先运行 worldview 命令）"
-
-    preserved_section = ""
-    if preserved_content:
-        preserved_section = f"【已有定稿中值得保留的大纲内容】\n以下内容来自已定稿章节的分析，重新生成大纲时必须保留这些内容的延续性：\n{preserved_content}"
-
-    prompt = PromptLoader.load(
-        "adaptive_novel_outline",
-        reference_outline=reference_outline,
-        reference_worldview=reference_worldview,
-        inspirations="（无灵感库）",
-        creative_direction=direction or "（用户未提供具体方向，请自主发挥创意）",
-        outline_rules=_load_outline_rules(ws),
-        preserved_content=preserved_section,
-    )
-    draft = normalize_text(llm.generate(prompt))
-    world_knowledge = _load_world_knowledge_optional(ws, "新小说大纲合理性校正")
-    if not world_knowledge:
-        return draft
-
-    draft_path = os.path.join(ws.file_system, "adaptation", "novel_outline_draft.md")
-    _write_file(draft_path, draft)
-    print(f"  -> 新小说大纲初稿已保存：{draft_path}")
-    print(">>> 基于目标世界资料库校正新小说大纲 <<<")
-
-    adjust_prompt = PromptLoader.load(
-        "novel_outline_world_adjust",
-        creative_direction=direction or "（用户未提供具体方向，请自主发挥创意）",
-        reference_worldview=reference_worldview,
-        reference_outline=reference_outline,
-        world_knowledge=world_knowledge,
-        outline_rules=_load_outline_rules(ws),
-        preserved_content=preserved_section,
-        draft_outline=draft,
-    )
-    return normalize_text(llm.generate(adjust_prompt))
-
-
-def _gen_new_novel_worldview_aggregated(ws, llm):
-    """基于新小说大纲 + 参考小说全书世界观，生成新小说全书世界观。"""
-    novel_outline = _read_file(os.path.join(ws.file_system, "novel_outline.md"))
-    if not novel_outline:
-        print("错误：未找到新小说大纲。")
-        return
-
-    ref_wv = _read_file(os.path.join(ws.file_system, "reference_worldview.md"))
-    if not ref_wv:
-        print("错误：未找到参考小说世界观。请先运行 worldview 命令。")
-        return
-
-    aggregated_path = os.path.join(ws.file_system, "new_novel_worldview.md")
-    existing = _read_file(aggregated_path)
-    if existing:
-        print(f"新小说世界观已存在：{aggregated_path}")
-        print("使用 --force 覆盖。")
-        return
-
-    print(">>> 生成新小说全书世界观 <<<")
-    world_knowledge = _load_world_knowledge_optional(ws, "新小说全书世界观校正")
-    world_knowledge_section = (
-        "【目标世界知识库】（合理性校验优先级高于参考小说旧世界观）\n"
-        + world_knowledge
-        + "\n\n"
-        if world_knowledge
-        else ""
-    )
-
-    prompt = PromptLoader.load(
-        "new_novel_worldview",
-        novel_outline=novel_outline,
-        world_knowledge_section=world_knowledge_section,
-        reference_worldview=ref_wv,
-    )
-    result = normalize_text(llm.generate(prompt))
-    _write_file(aggregated_path, result)
-    print(f"  -> 新小说全书世界观已保存：{aggregated_path}")
+    print(f"\n  -> 请审核编辑核心玩法、长线主线、舞台路线图和角色成长线后，再生成故事情节单元。")
 
 
 def import_target_world_sources(ws, paths, force=False):
@@ -380,11 +626,16 @@ def _extract_reference_name_synopsis(ws):
 
 
 def gen_novel_name_synopsis(ws, force=False):
-    """基于新小说大纲和世界观，推荐书名和简介。"""
+    """基于故事设计资产，推荐书名和简介。"""
     novel_outline = _read_file(os.path.join(ws.file_system, "novel_outline.md"))
     if not novel_outline:
-        print("错误：未找到新小说大纲，请先运行 novel-outline。")
-        return
+        assets = _load_story_design_assets(ws)
+        novel_outline = (
+            "【核心玩法】\n" + assets["core_gameplay"] + "\n\n"
+            "【全书长线主线】\n" + assets["long_mainline"] + "\n\n"
+            "【舞台路线图】\n" + assets["stage_roadmap"] + "\n\n"
+            "【角色成长线】\n" + assets["character_arcs"]
+        )
 
     output_path = os.path.join(ws.file_system, "novel_name_synopsis.md")
     existing = _read_file(output_path)
@@ -401,20 +652,70 @@ def gen_novel_name_synopsis(ws, force=False):
     if not llm:
         return
 
-    print(">>> 推荐书名与简介 <<<")
+    run_step(
+        llm=llm,
+        folder="novel_name_synopsis",
+        label="书名与简介",
+        header=">>> 推荐书名与简介 <<<",
+        write_guard=True,
+        output_path=output_path,
+        prompt_vars=dict(
+            reference_name=ref_name,
+            reference_synopsis=ref_synopsis,
+            novel_outline=novel_outline,
+            worldview=worldview or "（未生成世界观）",
+            creative_direction=direction,
+        ),
+    )
 
+
+def _stage_insert_backup_path(ws):
+    return os.path.join(ws.file_system, "adaptation", "stage_roadmap_before_insert.md")
+
+
+def insert_stage(ws, creative_direction=None, direction_file=None, after_stage=None, before_stage=None):
+    """基于新灵感设计新舞台，并插入全书舞台路线图。"""
+    stage_direction = _load_creative_direction(ws, creative_direction, direction_file)
+    if not stage_direction:
+        print("错误：请通过 --direction 或 --direction-file 提供新舞台灵感。")
+        return
+
+    llm = _get_llm()
+    if not llm:
+        return
+
+    stage_roadmap_path = _story_design_path(ws, "stage_roadmap.md")
+    stage_roadmap = _read_file(stage_roadmap_path)
+    if not stage_roadmap:
+        print("错误：未找到舞台路线图。请先运行 novel-outline 或 story-design。")
+        return
+
+    assets = _load_story_design_assets(ws)
+    world_knowledge = _load_world_knowledge_optional(ws, "新舞台插入")
+    if after_stage is not None:
+        insert_hint = f"请优先插入在舞台{after_stage}之后，并重新编号所有舞台。"
+    elif before_stage is not None:
+        insert_hint = f"请优先插入在舞台{before_stage}之前，并重新编号所有舞台。"
+    else:
+        insert_hint = "请根据核心玩法、长线主线和前后承接关系自行判断最佳插入位置。"
+
+    print(">>> 基于灵感插入新舞台 <<<")
     prompt = PromptLoader.load(
-        "novel_name_synopsis",
-        reference_name=ref_name,
-        reference_synopsis=ref_synopsis,
-        novel_outline=novel_outline,
-        worldview=worldview or "（未生成世界观）",
-        creative_direction=direction,
+        "stage_insert_design",
+        stage_direction=stage_direction,
+        insert_hint=insert_hint,
+        core_gameplay=assets["core_gameplay"],
+        long_mainline=assets["long_mainline"],
+        stage_roadmap=stage_roadmap,
+        character_arcs=assets["character_arcs"],
+        world_knowledge=world_knowledge or "（未提供目标世界知识库）",
     )
     result = normalize_text(llm.generate(prompt))
-    if result:
-        _write_file(output_path, result)
-        print(f"  -> 书名与简介已保存：{output_path}")
+    backup_path = _stage_insert_backup_path(ws)
+    _write_file(backup_path, stage_roadmap)
+    _write_file(stage_roadmap_path, result)
+    print(f"  -> 原舞台路线图已备份：{backup_path}")
+    print(f"  -> 新舞台路线图已保存：{stage_roadmap_path}")
 
 
 def _map_to_reference_volumes_sequential(ws, vol_idx, ref_volumes):
@@ -436,7 +737,7 @@ def _gen_volume_worldview(ws, vol_idx, llm, force, novel_outline, new_novel_worl
     existing_wv = _read_file(vol_wv_path)
     if existing_wv and not force:
         print(f"  卷{vol_idx}世界观已存在，跳过。")
-        return
+        return existing_wv
 
     # 读取本卷新卷纲（从按卷文件读取）
     vol_outline_dir = os.path.join(ws.file_system, "new_volume_outlines")
@@ -461,61 +762,69 @@ def _gen_volume_worldview(ws, vol_idx, llm, force, novel_outline, new_novel_worl
     print(f"  -> 生成卷{vol_idx}世界观...")
 
     rewrite_map = load_rewrite_map(ws, vol_idx)
-    forbidden_terms = load_forbidden_terms(ws, vol_idx)
-    forbidden_terms_text = format_forbidden_terms(forbidden_terms)
 
-    result = ""
-    audit_feedback = ""
-    violations = []
-    for attempt in range(2):
-        prompt = (
-            "你是一个专业的小说世界观设计专家。请基于新小说的全书世界观，结合本卷卷纲的具体内容，"
-            "细化生成指定卷的详细世界观设定。\n\n"
-            "【新小说全书世界观】\n" + new_novel_worldview + "\n\n"
-            "【本卷卷纲】\n" + current_vol_text + "\n\n"
-            "【换皮映射表】（必须遵守）\n" + rewrite_map + "\n\n"
-            "【禁止残留的参考元素】\n" + forbidden_terms_text + "\n\n"
-            + (f"【上一卷世界观】（保持世界观演进的一致性）\n{prev_wv}\n\n" if prev_wv else "")
-            + (f"【本卷旧世界观】（参考已有设定，在此基础上升级）\n{old_wv}\n\n" if old_wv else "")
-            + (audit_feedback + "\n\n" if audit_feedback else "")
-            + "【要求】\n"
-            "1. 以全书世界观为基础，细化到本卷涉及的具体势力、人物、地点、物品。\n"
-            "2. 体现世界观在本卷中的演进：新势力登场、角色成长、新区域解锁等。\n"
-            "3. 与上一卷世界观保持连续性，不要出现矛盾设定。\n"
-            "4. 每个方面必须列出具体名称，不能概括。\n"
-            "5. 不能把参考小说旧世界的事件、人物、时间线和宗教因果固化为新世界观事实。\n"
-            "6. 若本卷卷纲中的“对应参考小说”说明包含旧名词，只能理解为映射说明，不能写入新世界观正文。\n"
-            "7. 输出前自检：若出现禁止残留参考元素，必须改写为新世界观对应元素或删除。\n"
-            "8. 使用纯文本输出，禁止使用 Markdown 格式符号。标题使用 # 标记。段落之间用空行分隔。\n\n"
-            "按以下结构输出：\n"
-            "一、势力与人物\n"
-            "二、修炼体系\n"
-            "三、特殊物品\n"
-            "四、地理场景\n"
-            "五、种族与族群\n"
-            "六、核心规则与禁忌\n"
-            "七、主角金手指进展"
-        )
-        result = normalize_text(llm.generate(prompt))
-        violations = scan_forbidden_terms(
-            result,
-            forbidden_terms,
-            exempt_line_patterns=["对应参考", "参考小说", "映射说明"],
-        )
-        if not violations:
-            break
-        print(f"  卷{vol_idx}世界观检测到参考元素残留：{', '.join(violations)}，尝试重写...")
-        audit_feedback = (
-            f"【上次世界观违规项】\n"
-            f"上次输出把以下参考元素写入了新世界观正文：{', '.join(violations)}。\n"
-            "请根据换皮映射表改写或删除这些旧世界元素，不要把它们固化为新设定。"
-        )
+    prompt = (
+        "你是一个专业的小说世界观设计专家。请基于新小说的全书世界观，结合本卷卷纲的具体内容，"
+        "细化生成指定卷的详细世界观设定。\n\n"
+        "【新小说全书世界观】\n" + new_novel_worldview + "\n\n"
+        "【本卷卷纲】\n" + current_vol_text + "\n\n"
+        "【换皮映射表】（用于理解参考元素如何转译，必须以新小说设定为准）\n" + rewrite_map + "\n\n"
+        + (f"【上一卷世界观】（保持世界观演进的一致性）\n{prev_wv}\n\n" if prev_wv else "")
+        + (f"【本卷旧世界观】（参考已有设定，在此基础上升级）\n{old_wv}\n\n" if old_wv else "")
+        + "【要求】\n"
+        "1. 以全书世界观为基础，细化到本卷涉及的具体势力、人物、地点、物品。\n"
+        "2. 体现世界观在本卷中的演进：新势力登场、角色成长、新区域解锁等。\n"
+        "3. 与上一卷世界观保持连续性，不要出现矛盾设定。\n"
+        "4. 每个方面必须列出具体名称，不能概括。\n"
+        "5. 不能把参考小说旧世界的事件、人物、时间线和宗教因果固化为新世界观事实。\n"
+        "6. 若本卷卷纲中的“对应参考小说”说明包含旧名词，只能理解为映射说明，不能写入新世界观正文。\n"
+        "7. 使用纯文本输出，禁止使用 Markdown 格式符号。标题使用 # 标记。段落之间用空行分隔。\n\n"
+        "按以下结构输出：\n"
+        "一、势力与人物\n"
+        "二、修炼体系\n"
+        "三、特殊物品\n"
+        "四、地理场景\n"
+        "五、种族与族群\n"
+        "六、核心规则与禁忌\n"
+        "七、主角金手指进展"
+    )
+    result = normalize_text(llm.generate(prompt))
 
     _write_file(vol_wv_path, result)
-    if violations:
-        _audit_text(ws, f"卷{vol_idx}世界观", result, forbidden_terms,
-                    exempt_line_patterns=["对应参考", "参考小说", "映射说明"])
     print(f"  -> 卷{vol_idx}世界观已保存：{vol_wv_path}")
+    return result
+
+
+def _gen_volume_stage_plan(ws, vol_idx, llm, force, vol_outline, vol_worldview,
+                           novel_outline, new_novel_worldview):
+    """为当前卷生成舞台/副本计划。"""
+    output_path = _volume_stage_plan_path(ws, vol_idx)
+    existing = _read_file(output_path)
+    if existing and not force:
+        print(f"  卷{vol_idx}舞台计划已存在，跳过。")
+        return existing
+
+    assets = _load_story_design_assets(ws)
+    rewrite_map = load_rewrite_map(ws, vol_idx)
+
+    return run_step(
+        llm=llm,
+        folder="volume_stage_plan",
+        header=f"  -> 生成卷{vol_idx}舞台计划...",
+        save=f"  -> 卷{vol_idx}舞台计划已保存：{output_path}",
+        output_path=output_path,
+        prompt_vars=dict(
+            volume_index=vol_idx,
+            core_gameplay=assets["core_gameplay"],
+            stage_roadmap=assets["stage_roadmap"],
+            character_arcs=assets["character_arcs"],
+            novel_outline=novel_outline or "（未生成新小说大纲）",
+            new_novel_worldview=new_novel_worldview or "（未生成新小说世界观）",
+            volume_outline=vol_outline or "（未生成本卷卷纲）",
+            volume_worldview=vol_worldview or "（未生成本卷世界观）",
+            rewrite_map=rewrite_map,
+        ),
+    )
 
 
 def _gen_single_volume(ws, vol_idx, ref_volumes, force, creative_direction, llm, preserved_content=None):
@@ -527,6 +836,20 @@ def _gen_single_volume(ws, vol_idx, ref_volumes, force, creative_direction, llm,
     existing_this = _read_file(vol_file)
     if existing_this and not force:
         print(f"  -> 卷{vol_idx}卷纲已存在，跳过。（用 --force 覆盖）")
+        vol_outline_clean = re.sub(r'\n?\[(?:FINISHED|CONTINUE)\]\s*$', '', existing_this).strip()
+        existing_novel_outline = _read_file(os.path.join(ws.file_system, "novel_outline.md")) or ""
+        new_novel_worldview = _read_file(os.path.join(ws.file_system, "new_novel_worldview.md")) or "（无新小说世界观，请先运行 novel-outline 命令）"
+        vol_worldview = _gen_volume_worldview(ws, vol_idx, llm, force, existing_novel_outline, new_novel_worldview)
+        _gen_volume_stage_plan(
+            ws,
+            vol_idx,
+            llm,
+            force,
+            vol_outline_clean,
+            vol_worldview,
+            existing_novel_outline,
+            new_novel_worldview,
+        )
         if existing_this.rstrip().endswith("[FINISHED]"):
             return True
         return False
@@ -548,54 +871,32 @@ def _gen_single_volume(ws, vol_idx, ref_volumes, force, creative_direction, llm,
 
     ref_vol_outline = _map_to_reference_volumes_sequential(ws, vol_idx, ref_volumes)
     rewrite_map = load_rewrite_map(ws, vol_idx)
-    forbidden_terms = load_forbidden_terms(ws, vol_idx)
 
     preserved_section = ""
     if preserved_content:
         preserved_section = f"【已有定稿中值得保留的卷纲内容】\n以下内容来自已定稿章节的分析，重新生成卷纲时必须保留这些内容的延续性：\n{preserved_content}"
 
-    result = ""
-    audit_feedback = ""
-    violations = []
-    for attempt in range(2):
-        prompt = PromptLoader.load(
-            "adaptive_volume_outline",
-            novel_outline=novel_outline,
-            reference_volume_outline=ref_vol_outline or "（无参考卷纲）",
-            new_novel_worldview=new_novel_worldview,
-            rewrite_map=rewrite_map,
-            inspirations="（无灵感库）",
-            volume_index=vol_idx,
-            creative_direction=direction or "（用户未提供具体方向）",
-            previous_volumes=previous_volumes,
-            outline_rules=_load_outline_rules(ws),
-            preserved_content=preserved_section,
-            audit_feedback=audit_feedback,
-        )
-        result = normalize_text(llm.generate(prompt))
-        result_for_scan = re.sub(r'\n?\[(?:FINISHED|CONTINUE)\]\s*$', '', result).strip()
-        violations = scan_forbidden_terms(
-            result_for_scan,
-            forbidden_terms,
-            exempt_line_patterns=["对应参考", "参考小说", "映射说明"],
-        )
-        if not violations:
-            break
-        print(f"  卷{vol_idx}卷纲检测到参考元素残留：{', '.join(violations)}，尝试重写...")
-        audit_feedback = (
-            f"【上次卷纲违规项】\n"
-            f"上次输出在非“对应参考小说/映射说明”的正文设定中出现了：{', '.join(violations)}。\n"
-            "请保留卷纲结构和新小说设定，改写或删除这些旧世界元素。"
-        )
+    prompt = PromptLoader.load(
+        "adaptive_volume_outline",
+        novel_outline=novel_outline,
+        reference_volume_outline=ref_vol_outline or "（无参考卷纲）",
+        new_novel_worldview=new_novel_worldview,
+        rewrite_map=rewrite_map,
+        inspirations="（无灵感库）",
+        volume_index=vol_idx,
+        creative_direction=direction or "（用户未提供具体方向）",
+        previous_volumes=previous_volumes,
+        outline_rules=_load_outline_rules(ws),
+        preserved_content=preserved_section,
+        audit_feedback="",
+    )
+    result = normalize_text(llm.generate(prompt))
 
     if not result:
         return False
 
     is_finished = result.rstrip().endswith("[FINISHED]")
     result_clean = re.sub(r'\n?\[(?:FINISHED|CONTINUE)\]\s*$', '', result).strip()
-    if violations:
-        _audit_text(ws, f"卷{vol_idx}卷纲", result_clean, forbidden_terms,
-                    exempt_line_patterns=["对应参考", "参考小说", "映射说明"])
 
     # 写入按卷文件（保留 [FINISHED] 标记以便重跑时检测）
     marker = "\n[FINISHED]" if is_finished else "\n[CONTINUE]"
@@ -607,7 +908,17 @@ def _gen_single_volume(ws, vol_idx, ref_volumes, force, creative_direction, llm,
         print(f"  -> 第 {vol_idx} 卷卷纲已保存，继续生成下一卷。")
 
     # Step 2: 生成该卷的世界观
-    _gen_volume_worldview(ws, vol_idx, llm, force, novel_outline, new_novel_worldview)
+    vol_worldview = _gen_volume_worldview(ws, vol_idx, llm, force, novel_outline, new_novel_worldview)
+    _gen_volume_stage_plan(
+        ws,
+        vol_idx,
+        llm,
+        force,
+        result_clean,
+        vol_worldview,
+        novel_outline,
+        new_novel_worldview,
+    )
 
     return is_finished
 
@@ -701,6 +1012,267 @@ def gen_volume_outline(ws, volume=None, force=False, creative_direction=None, pr
 def _novel_outlines_dir(ws):
     """返回新小说批次摘要目录。"""
     return os.path.join(ws.file_system, "outlines")
+
+
+def _novel_story_arcs_dir(ws):
+    """返回新小说故事情节单元目录。"""
+    return os.path.join(ws.file_system, "story_arcs")
+
+
+def _volume_story_arc_dir(ws, volume):
+    return os.path.join(_novel_story_arcs_dir(ws), f"vol_{volume:02d}")
+
+
+def _story_arc_file_name(arc_idx, start_ch, end_ch):
+    return f"arc_{arc_idx:03d}_ch{start_ch:03d}_{end_ch:03d}.md"
+
+
+def _story_arc_path(ws, volume, arc_idx, start_ch, end_ch):
+    return os.path.join(
+        _volume_story_arc_dir(ws, volume),
+        _story_arc_file_name(arc_idx, start_ch, end_ch),
+    )
+
+
+def _story_pattern_path(ws, volume, arc_idx, start_ch, end_ch):
+    return os.path.join(
+        ws.file_system,
+        "adaptation",
+        "story_patterns",
+        f"vol_{volume:02d}",
+        f"arc_{arc_idx:03d}_ch{start_ch:03d}_{end_ch:03d}.md",
+    )
+
+
+def _arc_context_path(ws, volume):
+    return os.path.join(
+        ws.file_system,
+        "adaptation",
+        "arc_contexts",
+        f"vol_{volume:02d}_context.md",
+    )
+
+
+def _extract_stage_from_roadmap(stage_roadmap, stage_idx):
+    if not stage_roadmap:
+        return ""
+    pattern = re.compile(
+        rf'(?ms)^#\s*舞台\s*0*{stage_idx}\b.*?(?=^#\s*舞台\s*\d+\b|\Z)'
+    )
+    match = pattern.search(stage_roadmap)
+    return match.group(0).strip() if match else ""
+
+
+def _infer_stage_chapter_count(stage_text):
+    if not stage_text:
+        return 0
+    range_patterns = [
+        r'预计章节数[：:]\s*(\d+)\s*[-—~至到]\s*(\d+)',
+        r'章节数[：:]\s*(\d+)\s*[-—~至到]\s*(\d+)',
+        r'预计\s*(\d+)\s*[-—~至到]\s*(\d+)\s*章',
+    ]
+    for pattern in range_patterns:
+        m = re.search(pattern, stage_text)
+        if m:
+            return max(int(m.group(1)), int(m.group(2)))
+
+    patterns = [
+        r'预计章节数[：:]\s*(\d+)',
+        r'章节数[：:]\s*(\d+)',
+        r'预计\s*(\d+)\s*章',
+        r'共\s*(\d+)\s*章',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, stage_text)
+        if m:
+            return max(1, int(m.group(1)))
+
+    range_match = re.search(r'第\s*(\d+)\s*[-—~至到]\s*(\d+)\s*章', stage_text)
+    if range_match:
+        start = int(range_match.group(1))
+        end = int(range_match.group(2))
+        return max(1, end - start + 1)
+    return 0
+
+
+def _load_stage_context(ws, stage_idx):
+    stage_roadmap = _read_file(_story_design_path(ws, "stage_roadmap.md"))
+    stage_text = _extract_stage_from_roadmap(stage_roadmap, stage_idx)
+    if not stage_text:
+        return None
+    total_chapters = _infer_stage_chapter_count(stage_text)
+    if total_chapters <= 0:
+        print(f"错误：舞台{stage_idx}缺少“预计章节数”，无法生成故事情节单元。")
+        print("请补充 stage_roadmap.md 中该舞台的预计章节数，或重新运行 novel-outline/story-design。")
+        return None
+    long_mainline = _read_file(_story_design_path(ws, "long_mainline.md")) or "（未生成全书长线主线）"
+    stage_worldview = (
+        "【全书长线主线】\n" + long_mainline + "\n\n"
+        "【当前舞台规则与边界】\n" + stage_text
+    )
+    return stage_text, stage_worldview, total_chapters
+
+
+def _build_arc_context(ws, llm, volume, total_chapters, vol_outline, vol_worldview,
+                       rewrite_map, force=False):
+    """将全书/当前舞台上下文压缩为故事情节生成专用上下文。"""
+    out_path = _arc_context_path(ws, volume)
+    existing = _read_file(out_path)
+    if existing and not force:
+        return existing
+
+    assets = _load_story_design_assets(ws)
+    current_stage = _extract_stage_from_roadmap(assets["stage_roadmap"], volume)
+    if not current_stage:
+        current_stage = _read_file(_volume_stage_plan_path(ws, volume)) or "（未生成当前舞台计划）"
+
+    return run_step(
+        llm=llm,
+        folder="arc_context_extract",
+        output_path=out_path,
+        prompt_vars=dict(
+            volume_index=volume,
+            total_chapters=total_chapters,
+            core_gameplay=assets["core_gameplay"],
+            long_mainline=assets["long_mainline"],
+            current_stage=current_stage,
+            stage_roadmap=assets["stage_roadmap"],
+            character_arcs=assets["character_arcs"],
+            mechanics_context=_load_mechanics_context(ws),
+            volume_outline=vol_outline,
+            volume_worldview=vol_worldview,
+            rewrite_map=rewrite_map or "（新流程不依赖换皮映射表；参考小说只提供叙事功能）",
+        ),
+    )
+
+
+def _list_novel_story_arcs(ws, volume):
+    arc_dir = _volume_story_arc_dir(ws, volume)
+    if not os.path.isdir(arc_dir):
+        return []
+    items = []
+    for fname in sorted(os.listdir(arc_dir)):
+        m = STORY_ARC_FILE_RE.match(fname)
+        if not m:
+            continue
+        path = os.path.join(arc_dir, fname)
+        content = _read_file(path)
+        if not content:
+            continue
+        items.append({
+            "idx": int(m.group(1)),
+            "start_ch": int(m.group(2)),
+            "end_ch": int(m.group(3)),
+            "file": fname,
+            "path": path,
+            "content": content,
+        })
+    return items
+
+
+def _write_story_arc_index(ws, volume, arc_items):
+    index_path = os.path.join(_volume_story_arc_dir(ws, volume), "arcs_index.json")
+    lines = ["["]
+    for idx, item in enumerate(arc_items):
+        comma = "," if idx < len(arc_items) - 1 else ""
+        lines.append(
+            "  {"
+            f"\"id\": {item['idx']}, "
+            f"\"start_ch\": {item['start_ch']}, "
+            f"\"end_ch\": {item['end_ch']}, "
+            f"\"file\": \"{item['file']}\""
+            f"}}{comma}"
+        )
+    lines.append("]")
+    _write_file(index_path, "\n".join(lines))
+
+
+def _clear_story_arc_files(ws, volume):
+    arc_dir = _volume_story_arc_dir(ws, volume)
+    if not os.path.isdir(arc_dir):
+        return
+    for fname in os.listdir(arc_dir):
+        if STORY_ARC_FILE_RE.match(fname) or fname == "arcs_index.json":
+            os.remove(os.path.join(arc_dir, fname))
+
+
+def _target_story_arc_count(total_chapters):
+    return max(1, (total_chapters + STORY_ARC_TARGET_CHAPTERS - 1) // STORY_ARC_TARGET_CHAPTERS)
+
+
+def _select_reference_arc_groups(reference_arcs, target_count):
+    groups = []
+    for idx in range(target_count):
+        if idx < len(reference_arcs):
+            groups.append([reference_arcs[idx]])
+        else:
+            groups.append([])
+    return groups
+
+
+def _allocate_story_arc_lengths(total_chapters, target_count):
+    target_count = max(1, target_count)
+    base = total_chapters // target_count
+    remainder = total_chapters % target_count
+    return [
+        max(1, base + (1 if idx < remainder else 0))
+        for idx in range(target_count)
+    ]
+
+
+def _format_reference_arc_group(group):
+    if not group:
+        return "（无参考故事情节单元）"
+    parts = []
+    for arc in group:
+        source_label = "参考故事情节单元" if arc.get("source_type") == "story_arc" else "旧版参考批次"
+        parts.append(
+            f"【{source_label}{arc['idx']}：第{arc['start_ch']}-{arc['end_ch']}章】\n"
+            f"{arc.get('content', '')}"
+        )
+    return "\n\n---\n\n".join(parts)
+
+
+def _plan_story_arcs_from_reference(reference_arcs, total_chapters):
+    target_count = _target_story_arc_count(total_chapters)
+    groups = _select_reference_arc_groups(reference_arcs, target_count)
+    lengths = _allocate_story_arc_lengths(total_chapters, len(groups))
+
+    plans = []
+    start_ch = 1
+    for idx, (group, length) in enumerate(zip(groups, lengths), 1):
+        end_ch = min(total_chapters, start_ch + length - 1)
+        plans.append({
+            "idx": idx,
+            "start_ch": start_ch,
+            "end_ch": end_ch,
+            "reference_story_arc": _format_reference_arc_group(group),
+            "reference_range": "；".join(
+                f"第{arc['start_ch']}-{arc['end_ch']}章" for arc in group
+            ) or "无",
+        })
+        start_ch = end_ch + 1
+
+    if plans and plans[-1]["end_ch"] < total_chapters:
+        plans[-1]["end_ch"] = total_chapters
+    return plans
+
+
+def _find_story_arc_for_chapter(ws, volume, ch_num):
+    for arc in _list_novel_story_arcs(ws, volume):
+        if arc["start_ch"] <= ch_num <= arc["end_ch"]:
+            return arc["content"]
+    return ""
+
+
+def _find_legacy_batch_for_chapter(ws, volume, ch_num, total_chapters):
+    batch_dir = os.path.join(ws.file_system, "outlines", f"vol_{volume:02d}")
+    if not os.path.isdir(batch_dir):
+        return ""
+    batch_idx = (ch_num - 1) // BATCH_SIZE + 1
+    bs = (batch_idx - 1) * BATCH_SIZE + 1
+    be = min(batch_idx * BATCH_SIZE, total_chapters)
+    return _read_file(os.path.join(batch_dir, f"batch_{bs:03d}_{be:03d}.md")) or ""
 
 
 def _adapted_reference_batch_path(ws, volume, start_ch, end_ch):
@@ -901,39 +1473,85 @@ def _generate_batch_summary_with_audit(ws, llm, volume, batch_idx, start_ch, end
 
 
 
+def _extract_story_pattern(ws, llm, volume, arc_idx, start_ch, end_ch,
+                           arc_context, reference_story_arc, force=False):
+    """将参考故事情节抽象为叙事模式，避免后续直接换皮。"""
+    out_path = _story_pattern_path(ws, volume, arc_idx, start_ch, end_ch)
+    existing = _read_file(out_path)
+    if existing and not force:
+        return existing
+
+    return run_step(
+        llm=llm,
+        folder="story_pattern_extract",
+        output_path=out_path,
+        prompt_vars=dict(
+            arc_context=arc_context,
+            arc_index=arc_idx,
+            start_chapter=start_ch,
+            end_chapter=end_ch,
+            reference_story_arc=reference_story_arc or "（无参考故事情节单元）",
+        ),
+    )
 
 
+def _generate_story_arc_with_audit(ws, llm, volume, arc_idx, start_ch, end_ch,
+                                   arc_context, previous_story_arc,
+                                   reference_story_arc, story_pattern):
+    """基于叙事模式生成新书故事情节单元。"""
+    prompt = PromptLoader.load(
+        "novel_story_arc",
+        arc_context=arc_context,
+        arc_index=arc_idx,
+        start_chapter=start_ch,
+        end_chapter=end_ch,
+        previous_story_arc=previous_story_arc,
+        reference_story_arc=reference_story_arc or "（无参考故事情节单元）",
+        story_pattern=story_pattern,
+        audit_feedback="",
+        previous_result="",
+    )
+    return normalize_text(llm.generate(prompt))
 
-def gen_serial_chapter_outlines(ws, volume=1, force=False):
-    """两阶段串行生成章纲：
-    Phase 1: 串行生成本卷的批次摘要
-    Phase 2: 串行生成本卷每个batch下的章纲
-    """
-    # ── 加载基础数据 ──
+
+def _load_volume_outline_context(ws, volume):
+    """加载当前舞台/旧卷纲上下文，并推断总章数。"""
+    stage_context = _load_stage_context(ws, volume)
+    if stage_context:
+        return stage_context
+
     vol_outline_file = os.path.join(ws.file_system, "new_volume_outlines", f"vol_{volume:02d}_outline.md")
     vol_outline = _read_file(vol_outline_file)
     if not vol_outline:
-        print(f"错误：未找到卷{volume}的卷纲文件：{vol_outline_file}")
-        return
+        print(f"错误：未找到舞台{volume}，也未找到卷{volume}的旧卷纲文件：{vol_outline_file}")
+        print("新流程请先运行 novel-outline 生成 stage_roadmap.md，并确保对应舞台存在。")
+        return None
 
     vol_wv_file = os.path.join(ws.file_system, "new_worldviews", f"vol_{volume:02d}_worldview.md")
     vol_worldview = _read_file(vol_wv_file)
     if not vol_worldview:
         print(f"错误：未找到卷{volume}的世界观文件：{vol_wv_file}")
         print("请先运行 volume-outline 命令生成卷纲和世界观。")
-        return
+        return None
 
-    # 从卷纲中推断总章数
     chapter_nums = re.findall(r'第(\d+)章', vol_outline)
     if not chapter_nums:
         print("错误：无法从卷纲中推断总章数。")
+        return None
+
+    return vol_outline, vol_worldview, max(int(c) for c in chapter_nums)
+
+
+def gen_story_arcs(ws, volume=1, force=False):
+    """基于参考故事情节提取叙事模式，生成新书故事情节单元。"""
+    context = _load_volume_outline_context(ws, volume)
+    if not context:
         return
-    total_chapters = max(int(c) for c in chapter_nums)
+    vol_outline, vol_worldview, total_chapters = context
 
     llm = _get_llm()
     if not llm:
         return
-    _ensure_rewrite_map(ws, llm)
 
     # 参考卷映射
     outlines_dir = ws.reference_outlines
@@ -943,108 +1561,127 @@ def gen_serial_chapter_outlines(ws, volume=1, force=False):
         return
     ref_vol = ref_volumes[min(volume - 1, len(ref_volumes) - 1)]
     rewrite_map = load_rewrite_map(ws, volume)
-    forbidden_terms = load_forbidden_terms(ws, volume)
-    forbidden_terms_text = format_forbidden_terms(forbidden_terms)
-
-    # ═══════════════════════════════════════════
-    # Phase 1: 串行生成批次摘要
-    # ═══════════════════════════════════════════
-    print(f">>> Phase 1: 串行生成卷{volume}的批次摘要（共{total_chapters}章，每批{BATCH_SIZE}章）<<<")
-
-    vol_batch_dir = os.path.join(_novel_outlines_dir(ws), f"vol_{volume:02d}")
-    os.makedirs(vol_batch_dir, exist_ok=True)
-
-    batch_count = (total_chapters + BATCH_SIZE - 1) // BATCH_SIZE
-    for batch_idx in range(1, batch_count + 1):
-        start_ch = (batch_idx - 1) * BATCH_SIZE + 1
-        end_ch = min(batch_idx * BATCH_SIZE, total_chapters)
-        batch_file = os.path.join(vol_batch_dir, f"batch_{start_ch:03d}_{end_ch:03d}.md")
-
-        if os.path.exists(batch_file) and not force:
-            print(f"  批次{batch_idx}（第{start_ch}-{end_ch}章）已存在，跳过。")
-            continue
-
-        # 读取上一批次
-        prev_batch = ""
-        if batch_idx > 1:
-            prev_start = (batch_idx - 2) * BATCH_SIZE + 1
-            prev_end = min((batch_idx - 1) * BATCH_SIZE, total_chapters)
-            prev_file = os.path.join(vol_batch_dir, f"batch_{prev_start:03d}_{prev_end:03d}.md")
-            prev_batch = _read_file(prev_file) or ""
-        if not prev_batch:
-            prev_batch = "（无前序批次，这是第一个batch）"
-
-        # 参考批次
-        ref_batch = find_reference_batch(
-            outlines_dir, ref_vol["vol_idx"],
-            start_ch, end_ch, total_chapters,
-            ref_vol["chapter_count"],
-        )
-
-        print(f"  生成批次{batch_idx}（第{start_ch}-{end_ch}章）...")
-        adapted_reference_batch = _adapt_reference_batch(
-            ws=ws,
-            llm=llm,
-            volume=volume,
-            batch_idx=batch_idx,
-            start_ch=start_ch,
-            end_ch=end_ch,
-            vol_outline=vol_outline,
-            vol_worldview=vol_worldview,
-            reference_batch=ref_batch or "",
-            rewrite_map=rewrite_map,
-            forbidden_terms=forbidden_terms,
-            force=force,
-        )
-        result = _generate_batch_summary_with_audit(
-            ws=ws,
-            llm=llm,
-            volume=volume,
-            batch_idx=batch_idx,
-            start_ch=start_ch,
-            end_ch=end_ch,
-            vol_outline=vol_outline,
-            vol_worldview=vol_worldview,
-            previous_batch=prev_batch,
-            reference_batch=ref_batch or "",
-            adapted_reference_batch=adapted_reference_batch,
-            rewrite_map=rewrite_map,
-            forbidden_terms=forbidden_terms,
-        )
-        _write_file(batch_file, result)
-        print(f"  -> 批次{batch_idx}已保存：{batch_file}")
-
-    print(f"\n>>> Phase 1 完成，共 {batch_count} 个批次 <<<")
-
-    # ═══════════════════════════════════════════
-    # Phase 2: 串行生成章纲（按batch逐章生成）
-    # ═══════════════════════════════════════════
-    print(f"\n>>> Phase 2: 串行生成卷{volume}的章纲 <<<")
-
-    ch_out_dir = os.path.join(ws.file_system, "chapter_outlines", f"vol_{volume:02d}")
-    os.makedirs(ch_out_dir, exist_ok=True)
-
-    # 按批次文件顺序读取
-    batch_files = sorted(
-        f for f in os.listdir(vol_batch_dir)
-        if re.match(r'^batch_\d+_\d+\.md$', f)
+    print(f"  -> 构建卷{volume}故事情节生成上下文...")
+    arc_context = _build_arc_context(
+        ws=ws,
+        llm=llm,
+        volume=volume,
+        total_chapters=total_chapters,
+        vol_outline=vol_outline,
+        vol_worldview=vol_worldview,
+        rewrite_map=rewrite_map,
+        force=force,
     )
 
-    for bf_name in batch_files:
-        m = re.match(r'^batch_(\d+)_(\d+)\.md$', bf_name)
-        if not m:
+    reference_arcs = list_reference_story_arcs(outlines_dir, ref_vol["vol_idx"])
+    arc_plans = _plan_story_arcs_from_reference(reference_arcs, total_chapters)
+    story_arc_dir = _volume_story_arc_dir(ws, volume)
+    if force:
+        _clear_story_arc_files(ws, volume)
+    os.makedirs(story_arc_dir, exist_ok=True)
+
+    print(f">>> 串行生成卷{volume}的故事情节单元（共{total_chapters}章，规划{len(arc_plans)}个情节单元）<<<")
+
+    generated_items = []
+    for plan in arc_plans:
+        arc_idx = plan["idx"]
+        start_ch = plan["start_ch"]
+        end_ch = plan["end_ch"]
+        arc_file = _story_arc_path(ws, volume, arc_idx, start_ch, end_ch)
+        arc_name = _story_arc_file_name(arc_idx, start_ch, end_ch)
+        existing = _read_file(arc_file)
+        if existing and not force:
+            print(f"  情节单元{arc_idx}（第{start_ch}-{end_ch}章）已存在，跳过。")
+            generated_items.append({
+                "idx": arc_idx,
+                "start_ch": start_ch,
+                "end_ch": end_ch,
+                "file": arc_name,
+                "path": arc_file,
+                "content": existing,
+            })
             continue
-        batch_start = int(m.group(1))
-        batch_end = int(m.group(2))
 
-        batch_content = _read_file(os.path.join(vol_batch_dir, bf_name))
-        if not batch_content:
-            print(f"  警告：批次文件 {bf_name} 为空，跳过。")
+        previous_story_arc = ""
+        if generated_items:
+            previous_story_arc = generated_items[-1]["content"]
+        if not previous_story_arc:
+            previous_story_arc = "（无前序故事情节单元，这是本卷第一个情节单元）"
+
+        print(f"  提取情节单元{arc_idx}叙事模式（第{start_ch}-{end_ch}章，叙事样本：{plan['reference_range']}）...")
+        story_pattern = _extract_story_pattern(
+            ws=ws,
+            llm=llm,
+            volume=volume,
+            arc_idx=arc_idx,
+            start_ch=start_ch,
+            end_ch=end_ch,
+            arc_context=arc_context,
+            reference_story_arc=plan["reference_story_arc"],
+            force=force,
+        )
+
+        print(f"  生成新故事情节单元{arc_idx}（第{start_ch}-{end_ch}章）...")
+        result = _generate_story_arc_with_audit(
+            ws=ws,
+            llm=llm,
+            volume=volume,
+            arc_idx=arc_idx,
+            start_ch=start_ch,
+            end_ch=end_ch,
+            arc_context=arc_context,
+            previous_story_arc=previous_story_arc,
+            reference_story_arc=plan["reference_story_arc"],
+            story_pattern=story_pattern,
+        )
+        _write_file(arc_file, result)
+        generated_items.append({
+            "idx": arc_idx,
+            "start_ch": start_ch,
+            "end_ch": end_ch,
+            "file": arc_name,
+            "path": arc_file,
+            "content": result,
+        })
+        print(f"  -> 故事情节单元{arc_idx}已保存：{arc_file}")
+
+    _write_story_arc_index(ws, volume, generated_items)
+    print(f"\n>>> 卷{volume}故事情节单元已生成，共 {len(generated_items)} 个。<<<")
+
+
+def gen_serial_chapter_outlines(ws, volume=1, force=False):
+    """基于已生成的新书故事情节单元，串行生成本卷逐章章纲。"""
+    context = _load_volume_outline_context(ws, volume)
+    if not context:
+        return
+    vol_outline, vol_worldview, total_chapters = context
+
+    ch_out_dir = os.path.join(ws.file_system, "chapter_outlines", f"vol_{volume:02d}")
+    story_arcs = _list_novel_story_arcs(ws, volume)
+    if not story_arcs:
+        print("错误：未找到故事情节单元，无法生成章纲。请先运行 story-arcs。")
+        return
+
+    llm = _get_llm()
+    if not llm:
+        return
+    rewrite_map = load_rewrite_map(ws, volume)
+    mechanics_context = _load_mechanics_context(ws)
+
+    print(f">>> 串行生成卷{volume}的章纲 <<<")
+    os.makedirs(ch_out_dir, exist_ok=True)
+
+    for arc in story_arcs:
+        arc_start = arc["start_ch"]
+        arc_end = arc["end_ch"]
+        arc_content = arc["content"]
+        if not arc_content:
+            print(f"  警告：故事情节单元 {arc['file']} 为空，跳过。")
             continue
 
-        print(f"\n  --- 批次：第{batch_start}-{batch_end}章 ---")
+        print(f"\n  --- 故事情节单元{arc['idx']}：第{arc_start}-{arc_end}章 ---")
 
-        for ch_num in range(batch_start, batch_end + 1):
+        for ch_num in range(arc_start, arc_end + 1):
             out_file = os.path.join(ch_out_dir, f"chapter_{ch_num:03d}.md")
             if os.path.exists(out_file) and not force:
                 print(f"  第{ch_num}章章纲已存在，跳过。")
@@ -1066,8 +1703,9 @@ def gen_serial_chapter_outlines(ws, volume=1, force=False):
                 volume_outline=vol_outline,
                 volume_worldview=vol_worldview,
                 rewrite_map=rewrite_map,
-                forbidden_terms="章纲阶段不执行禁用词扫描。请以本卷卷纲、本卷世界观、换皮映射表和当前批次摘要为准，保持剧情合理性，不要主动引入与当前阶段不符的旧世界因果。",
-                batch_summary=batch_content,
+                forbidden_terms="章纲阶段不执行禁用词扫描。请以当前舞台、当前故事情节单元、角色线和长线主线为准，保持剧情合理性，不要主动引入与当前阶段不符的旧世界因果。",
+                mechanics_context=mechanics_context,
+                batch_summary=arc_content,
                 previous_chapter_outlines=previous_text,
                 chapter_num=ch_num,
             )
@@ -1078,27 +1716,72 @@ def gen_serial_chapter_outlines(ws, volume=1, force=False):
     print(f"\n>>> 卷{volume}全部 {total_chapters} 章章纲已生成。<<<")
 
 
-def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
-    """串行生成正文：以卷纲+本卷世界观+本章章纲+前2章正文+写作文风为输入生成下一章正文。"""
+def _raw_chapter_backup_path(ws, volume, chapter_num):
+    raw_dir = os.path.join(ws.file_system, "drafts", f"vol_{volume:02d}", "raw_chapters")
+    return os.path.join(raw_dir, f"{chapter_num:03d}_第{chapter_num}章.raw.md")
+
+
+def _backup_raw_chapter(ws, volume, chapter_num, content):
+    """保存去AI味前的原稿；已存在时保留第一次备份。"""
+    backup_path = _raw_chapter_backup_path(ws, volume, chapter_num)
+    if os.path.exists(backup_path):
+        return backup_path
+    _write_file(backup_path, content)
+    return backup_path
+
+
+def _humanize_chapter_text(
+    llm,
+    ws,
+    volume,
+    chapter_num,
+    chapter_text,
+):
+    _backup_raw_chapter(ws, volume, chapter_num, chapter_text)
+    prompt = PromptLoader.load(
+        "humanize_chapter",
+        chapter_text=chapter_text,
+    )
+    result = normalize_text(llm.generate(prompt))
+    return result or chapter_text
+
+
+def gen_serial_chapters(
+    ws,
+    volume=1,
+    start_chapter=1,
+    max_chapters=None,
+    humanize=True,
+    humanize_existing=False,
+):
+    """串行生成正文：以当前舞台+故事情节单元+本章章纲+前2章正文+写作文风为输入生成下一章正文。"""
     # 项目根目录
     _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    # 读取卷纲
-    vol_outline = _read_file(os.path.join(ws.file_system, "new_volume_outlines", f"vol_{volume:02d}_outline.md"))
-    if not vol_outline:
-        print(f"错误：未找到卷{volume}的卷纲文件。请先运行 volume-outline。")
+    context = _load_volume_outline_context(ws, volume)
+    if not context:
         return
-
-    # 读取本卷世界观
-    vol_worldview = _read_file(os.path.join(ws.file_system, "new_worldviews", f"vol_{volume:02d}_worldview.md"))
-    if not vol_worldview:
-        print(f"错误：未找到卷{volume}的世界观文件。请先运行 volume-outline。")
-        return
+    vol_outline, vol_worldview, _ = context
 
     # 读取写作文风规范（从项目根目录读取）
     style_guide = _read_file(os.path.join(_root, "core", "system_prompt.md")) or ""
     agents_md = _read_file(os.path.join(_root, "core", "agents.md")) or ""
     writing_rules = f"{style_guide}\n\n{agents_md}" if style_guide or agents_md else "（无写作文风规范）"
+    hard_style_rules = (
+        "=== 本轮正文硬性风格约束（最终优先）===\n"
+        "1. 不使用二分对比套式：例如“不是A，而是B”“不是X，也不是Y，是Z”。\n"
+        "2. 不使用否定递进套式：例如“不仅是A，更是B”“不只是A，更是B”。\n"
+        "3. 不使用破折号。需要停顿时用逗号、句号或直接拆句。\n"
+        "4. 如果参考小说、章纲、前序正文或写作规范示例中出现上述写法，只能视为反例，不能照搬。\n"
+    )
+    writing_rules = f"{writing_rules}\n\n{hard_style_rules}"
+    print(
+        "  -> 已加载写作规范："
+        f"core/system_prompt.md {len(style_guide)} 字；"
+        f"core/agents.md {len(agents_md)} 字。"
+    )
+    if not style_guide and not agents_md:
+        print("     警告：未加载到写作规范，正文生成将缺少风格约束。")
 
     # 扫描章纲
     outlines_dir = os.path.join(ws.file_system, "chapter_outlines", f"vol_{volume:02d}")
@@ -1123,33 +1806,71 @@ def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
     llm = _get_llm()
     if not llm:
         return
-    _ensure_rewrite_map(ws, llm)
     rewrite_map = load_rewrite_map(ws, volume)
-    forbidden_terms = load_forbidden_terms(ws, volume)
-    forbidden_terms_text = format_forbidden_terms(forbidden_terms)
+    legacy_map_section = (
+        f"=== 旧流程换皮映射表（仅兼容旧工作区；若与当前舞台冲突，以当前舞台为准）===\n{rewrite_map}\n\n"
+        if rewrite_map
+        else ""
+    )
+    mechanics_context = _load_mechanics_context(ws)
 
     out_dir = os.path.join(ws.file_system, "chapters", f"vol_{volume:02d}")
     os.makedirs(out_dir, exist_ok=True)
 
-    # 确定待生成章节
-    pending = []
+    # 确定待处理章节
+    tasks = []
     for ch_num in range(start_chapter, total_chapters + 1):
         out_file = os.path.join(out_dir, f"{ch_num:03d}_第{ch_num}章.md")
         if os.path.exists(out_file):
-            print(f"  第{ch_num}章正文已存在，跳过。")
+            if humanize and humanize_existing:
+                tasks.append(("humanize_existing", ch_num))
+            else:
+                print(f"  第{ch_num}章正文已存在，跳过。")
+            if max_chapters and len(tasks) >= max_chapters:
+                break
             continue
-        pending.append(ch_num)
-        if max_chapters and len(pending) >= max_chapters:
+        tasks.append(("generate", ch_num))
+        if max_chapters and len(tasks) >= max_chapters:
             break
 
-    if not pending:
+    if not tasks:
         print("[Orchestrator] 没有待生成的章节（全部已存在）。")
+        if humanize and not humanize_existing:
+            print("  如需对已有正文执行去AI味，可使用 --humanize-existing。")
         return
 
-    print(f"  待生成：{len(pending)} 章（第 {pending[0]}-{pending[-1]} 章）")
+    generate_count = sum(1 for mode, _ in tasks if mode == "generate")
+    existing_count = len(tasks) - generate_count
+    range_text = f"第 {tasks[0][1]}-{tasks[-1][1]} 章"
+    if existing_count:
+        print(f"  待处理：{len(tasks)} 章（{range_text}；新生成 {generate_count}，已有正文去AI味 {existing_count}）")
+    else:
+        print(f"  待生成：{generate_count} 章（{range_text}）")
 
-    for idx, ch_num in enumerate(pending):
+    for idx, (task_mode, ch_num) in enumerate(tasks):
         out_file = os.path.join(out_dir, f"{ch_num:03d}_第{ch_num}章.md")
+
+        if task_mode == "generate":
+            print(f"\n--- 撰写第{ch_num}章（{idx + 1}/{len(tasks)}）---")
+        else:
+            print(f"\n--- 去AI味第{ch_num}章（{idx + 1}/{len(tasks)}）---")
+
+        if task_mode == "humanize_existing":
+            existing_text = _read_file(out_file)
+            if not existing_text:
+                print(f"  警告：第{ch_num}章正文为空，跳过。")
+                continue
+            result = _humanize_chapter_text(
+                llm,
+                ws,
+                volume,
+                ch_num,
+                existing_text,
+            )
+            _write_file(out_file, result)
+            print(f"  -> 第{ch_num}章正文已去AI味并保存：{out_file}")
+            print(f"     原稿备份：{_raw_chapter_backup_path(ws, volume, ch_num)}")
+            continue
 
         # 读取本章章纲
         chapter_outline = _read_file(os.path.join(outlines_dir, f"chapter_{ch_num:03d}.md"))
@@ -1157,8 +1878,6 @@ def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
             print(f"  警告：第{ch_num}章章纲文件不存在，跳过。")
             continue
         chapter_outline = re.sub(r'\n?\[(?:FINISHED|CONTINUE)\]\s*$', '', chapter_outline).strip()
-
-        print(f"\n--- 撰写第{ch_num}章（{idx + 1}/{len(pending)}）---")
 
         # 读取前2章正文（不截断）
         prev_texts = []
@@ -1169,17 +1888,10 @@ def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
                 prev_texts.append(content.strip())
         history_section = "\n\n".join(prev_texts) if prev_texts else "（无前序正文，这是第一章）"
 
-        # 读取本章对应的批次摘要
-        batch_summary = ""
-        batch_dir = os.path.join(ws.file_system, "outlines", f"vol_{volume:02d}")
-        if os.path.isdir(batch_dir):
-            batch_idx = (ch_num - 1) // BATCH_SIZE + 1
-            bs = (batch_idx - 1) * BATCH_SIZE + 1
-            be = min(batch_idx * BATCH_SIZE, total_chapters)
-            bf = os.path.join(batch_dir, f"batch_{bs:03d}_{be:03d}.md")
-            batch_content = _read_file(bf)
-            if batch_content:
-                batch_summary = batch_content
+        # 读取本章对应的故事情节单元；旧工作区回退批次摘要。
+        story_arc_summary = _find_story_arc_for_chapter(ws, volume, ch_num)
+        if not story_arc_summary:
+            story_arc_summary = _find_legacy_batch_for_chapter(ws, volume, ch_num, total_chapters)
 
         # 加载参考小说对应章节正文
         from training.outline_builder import load_chapter_text
@@ -1187,45 +1899,41 @@ def gen_serial_chapters(ws, volume=1, start_chapter=1, max_chapters=None):
 
         context = (
             f"=== 前序正文 ===\n{history_section}\n\n"
+            f"=== 当前舞台 ===\n{vol_outline}\n\n"
+            f"=== 当前舞台长线与边界 ===\n{vol_worldview}\n\n"
+            f"=== 当前故事情节单元 ===\n{story_arc_summary or '（未找到故事情节单元，请严格以章纲为准）'}\n\n"
             f"=== 章纲（第{ch_num}章）===\n{chapter_outline}\n\n"
-            f"=== 换皮映射表 ===\n{rewrite_map}\n\n"
-            f"=== 禁止残留的参考元素 ===\n{forbidden_terms_text}\n\n"
+            f"=== 机制层 mechanics ===\n{mechanics_context}\n\n"
+            + legacy_map_section
             + (f"=== 参考小说本章正文 ===\n{ref_chapter_text}\n\n" if ref_chapter_text else "")
             + f"=== 写作规范 ===\n{writing_rules}"
         )
 
-        result = ""
-        violations = []
-        for attempt in range(2):
-            retry_context = context
-            if violations:
-                retry_context += (
-                    f"\n\n=== 上次生成违规项 ===\n"
-                    f"正文出现了以下禁止残留参考元素：{', '.join(violations)}。\n"
-                    "请保留本章章纲事件和情绪节点，改写或删除这些旧世界元素。"
-                )
-            prompt = PromptLoader.load(
-                "adaptive_drafting",
-                context=retry_context,
-                start_chapter=ch_num,
-                end_chapter=ch_num,
-                chapter_count=1,
-            )
-            result = normalize_text(llm.generate(prompt))
-            violations = scan_forbidden_terms(result, forbidden_terms)
-            if not violations:
-                break
-            print(f"  第{ch_num}章正文检测到参考元素残留：{', '.join(violations)}，尝试重写...")
-        if violations:
-            append_adaptation_report(
+        prompt = PromptLoader.load(
+            "adaptive_drafting",
+            context=context,
+            start_chapter=ch_num,
+            end_chapter=ch_num,
+            chapter_count=1,
+        )
+        result = normalize_text(llm.generate(prompt))
+        if humanize:
+            print(f"  第{ch_num}章正文去AI味处理中...")
+            result = _humanize_chapter_text(
+                llm,
                 ws,
-                f"卷{volume}第{ch_num}章正文残留",
-                f"违规项：{', '.join(violations)}\n文件：{out_file}",
+                volume,
+                ch_num,
+                result,
             )
         _write_file(out_file, result)
-        print(f"  -> 第{ch_num}章正文已保存：{out_file}")
+        if humanize:
+            print(f"  -> 第{ch_num}章正文已保存：{out_file}")
+            print(f"     原稿备份：{_raw_chapter_backup_path(ws, volume, ch_num)}")
+        else:
+            print(f"  -> 第{ch_num}章正文已保存：{out_file}")
 
-    print(f"\n  -> 卷{volume}正文生成完毕（共 {len(pending)} 章）。")
+    print(f"\n  -> 卷{volume}正文处理完毕（共 {len(tasks)} 章）。")
 
 
 def gen_worldview(ws):
@@ -1269,16 +1977,17 @@ def gen_worldview(ws):
 
         vol_outline = load_reference_volume_outline(ws.reference_outlines, vol_idx)
 
-        # 收集本卷的批次摘要
-        batch_files = sorted(glob.glob(os.path.join(vol["dir_path"], "batch_*.md")))
+        # 收集本卷的故事情节单元；旧工作区回退批次摘要
+        arc_files = sorted(glob.glob(os.path.join(vol["dir_path"], "story_arcs", "arc_*.md")))
+        source_files = arc_files or sorted(glob.glob(os.path.join(vol["dir_path"], "batch_*.md")))
         batch_contents = []
-        for bf in batch_files:
+        for bf in source_files:
             content = _read_file(bf)
             if content:
                 batch_contents.append(content)
 
         if not batch_contents:
-            print(f"  卷{vol_idx}无批次摘要，跳过。")
+            print(f"  卷{vol_idx}无故事情节单元或批次摘要，跳过。")
             continue
 
         batches_text = "\n\n---\n\n".join(batch_contents)

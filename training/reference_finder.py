@@ -11,6 +11,7 @@ VOL_DIR_RE = re.compile(r'^vol_(\d+)_(.+)$')
 
 # 批次文件名格式：batch_001_030.md
 BATCH_FILE_RE = re.compile(r'^batch_(\d+)_(\d+)\.md$')
+ARC_FILE_RE = re.compile(r'^arc_(\d+)_ch(\d+)_(\d+)\.md$')
 
 
 def _load_volume_meta(dir_path):
@@ -44,9 +45,12 @@ def list_reference_volumes(outlines_dir=None):
         if meta:
             chapter_count = meta["end_ch"] - meta["start_ch"] + 1
         else:
-            # 自然卷：从批次文件名推断章节数
-            batch_files = glob.glob(os.path.join(dir_path, "batch_*.md"))
             chapter_count = 0
+            # 新版：从故事情节单元文件名推断章节数
+            for arc in _story_arc_files(dir_path):
+                chapter_count = max(chapter_count, arc["end_ch"])
+            # 旧版：从批次文件名推断章节数
+            batch_files = glob.glob(os.path.join(dir_path, "batch_*.md"))
             for bf in batch_files:
                 bm = BATCH_FILE_RE.match(os.path.basename(bf))
                 if bm:
@@ -96,9 +100,77 @@ def _read_file(path):
         return f.read().strip()
 
 
+def _story_arc_dir(vol_dir):
+    return os.path.join(vol_dir, "story_arcs")
+
+
+def _story_arc_files(vol_dir):
+    arc_dir = _story_arc_dir(vol_dir)
+    if not os.path.isdir(arc_dir):
+        return []
+    items = []
+    for fname in sorted(os.listdir(arc_dir)):
+        m = ARC_FILE_RE.match(fname)
+        if not m:
+            continue
+        items.append({
+            "idx": int(m.group(1)),
+            "start_ch": int(m.group(2)),
+            "end_ch": int(m.group(3)),
+            "path": os.path.join(arc_dir, fname),
+        })
+    return items
+
+
+def list_reference_story_arcs(outlines_dir, vol_idx):
+    """加载参考小说指定卷的故事情节单元。
+
+    新版工作区优先读取 story_arcs/arc_*.md；旧工作区回退 batch_*.md，
+    并把旧批次当成粗粒度故事情节单元返回。
+    """
+    volumes = list_reference_volumes(outlines_dir)
+    vol_info = None
+    for vol in volumes:
+        if vol["vol_idx"] == vol_idx:
+            vol_info = vol
+            break
+
+    if vol_info is None:
+        return []
+
+    items = []
+    for arc in _story_arc_files(vol_info["dir_path"]):
+        content = _read_file(arc["path"])
+        if not content:
+            continue
+        copied = dict(arc)
+        copied["content"] = content
+        copied["source_type"] = "story_arc"
+        items.append(copied)
+    if items:
+        return items
+
+    for bf in sorted(glob.glob(os.path.join(vol_info["dir_path"], "batch_*.md"))):
+        bm = BATCH_FILE_RE.match(os.path.basename(bf))
+        if not bm:
+            continue
+        content = _read_file(bf)
+        if not content:
+            continue
+        items.append({
+            "idx": len(items) + 1,
+            "start_ch": int(bm.group(1)),
+            "end_ch": int(bm.group(2)),
+            "path": bf,
+            "content": content,
+            "source_type": "legacy_batch",
+        })
+    return items
+
+
 def find_reference_batch(outlines_dir, vol_idx, prod_start, prod_end,
                          prod_vol_total, ref_vol_total=None):
-    """按比例映射，找到对应的参考批次文件并返回拼接内容。
+    """按比例映射，优先找到对应的参考故事情节单元，旧工作区回退参考批次文件。
 
     参数：
         outlines_dir: 参考大纲目录
@@ -107,7 +179,7 @@ def find_reference_batch(outlines_dir, vol_idx, prod_start, prod_end,
         prod_vol_total: 生产小说本卷总章数
         ref_vol_total: 参考小说本卷总章数（若为 None 则自动获取）
 
-    返回：拼接的批次文件内容字符串
+    返回：拼接的参考故事情节/批次内容字符串
     """
     volumes = list_reference_volumes(outlines_dir)
     vol_info = None
@@ -144,7 +216,17 @@ def find_reference_batch(outlines_dir, vol_idx, prod_start, prod_end,
         ref_start += offset
         ref_end += offset
 
-    # 找到覆盖该范围的批次文件
+    # 新版：找到覆盖该范围的故事情节单元
+    arc_contents = []
+    for arc in _story_arc_files(vol_info["dir_path"]):
+        if arc["end_ch"] >= ref_start and arc["start_ch"] <= ref_end:
+            content = _read_file(arc["path"])
+            if content:
+                arc_contents.append(content)
+    if arc_contents:
+        return "\n\n---\n\n".join(arc_contents)
+
+    # 旧版：找到覆盖该范围的批次文件
     batch_contents = []
     for bf in sorted(glob.glob(os.path.join(vol_info["dir_path"], "batch_*.md"))):
         bm = BATCH_FILE_RE.match(os.path.basename(bf))

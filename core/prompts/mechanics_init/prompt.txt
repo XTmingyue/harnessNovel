@@ -1,0 +1,83 @@
+你是一个长篇网文“机制层”设计师。请根据新小说设计资料，判断是否需要启用 mechanics，并初始化机制层资产。
+
+这里的 mechanics 不是所有小说都必须有的“系统面板”。它是小说中需要被稳定追踪或计算的规则层。
+
+可能模式：
+1. none：不需要机制层。适合纯剧情、情绪、智斗、身份错位、社交博弈为主，且不依赖数值结算的小说。
+2. light_state：不展示系统面板，但需要内部追踪关键状态。适合修仙境界、资源、伤势、身份、关系、人情债、伏笔状态等需要保持一致的小说。
+3. explicit_mechanics：显式系统/游戏/面板/任务/经验/积分/技能树/领主资源等。数值和状态需要程序维护，正文不能让模型乱算。
+
+【用户机制设定】（若不为空，优先级最高；可能来自 --file、--direction 或用户显式描述）
+{mechanics_source}
+
+【创作方向】
+{creative_direction}
+
+【核心玩法】
+{core_gameplay}
+
+【全书长线主线】
+{long_mainline}
+
+【舞台路线图】
+{stage_roadmap}
+
+【角色成长线】
+{character_arcs}
+
+【设计要求】
+1. 先判断是否需要 mechanics。不要因为工具支持系统，就给所有小说硬塞面板。
+2. 如果用户机制设定明确要求系统、面板、经验值、任务、积分、技能树等，必须使用 explicit_mechanics。
+3. 如果没有显式系统，但有境界、资源、装备、身份、伤势、关系等需要持续一致，使用 light_state。
+4. 如果核心爽点不依赖可追踪状态，使用 none。
+5. rules 必须是程序可读的 JSON 对象。暂时不要求支持复杂公式解释器，但要把可计算字段、事件类型、展示模板写清楚。
+6. state 是初始状态，只写开书时已经成立的状态，不要提前给后期能力。
+7. 面板文案可以设计得贴合题材，但不要写正文。
+
+请只输出一个 JSON 对象，不要 Markdown，不要代码块，不要解释。
+
+JSON 结构必须如下：
+
+{{
+  "profile": {{
+    "mode": "none | light_state | explicit_mechanics",
+    "enabled": true,
+    "visible_panel": false,
+    "precision": "none | loose | strict",
+    "type": "none | state_tracking | system_panel | game_panel | cultivation_state | lord_management | infinite_flow_points | custom",
+    "reason": "为什么这样判断",
+    "tracked_domains": ["需要追踪的领域"]
+  }},
+  "design": "机制层设计说明。若 mode 为 none，说明为什么关闭；若启用，说明机制定位、展示方式、爽点反馈、禁忌。",
+  "rules": {{
+    "version": 1,
+    "mode": "none | light_state | explicit_mechanics",
+    "event_types": [
+      {{
+        "type": "gain_exp",
+        "description": "事件含义",
+        "fields": ["amount", "source"],
+        "calculation": "如何计算或由谁确定"
+      }}
+    ],
+    "display": {{
+      "panel_enabled": false,
+      "panel_name": "面板名称或空字符串",
+      "chapter_panel_sections": ["章节中可展示或内部追踪的栏目"]
+    }},
+    "constraints": [
+      "模型不能自行修改的规则"
+    ]
+  }},
+  "state": {{
+    "version": 1,
+    "mode": "none | light_state | explicit_mechanics",
+    "chapter": 0,
+    "values": {{}},
+    "inventory": {{}},
+    "skills": {{}},
+    "tasks": {{}},
+    "relationships": {{}},
+    "flags": {{}}
+  }}
+}}

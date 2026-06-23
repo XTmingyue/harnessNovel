@@ -17,12 +17,12 @@ def cmd_config(args):
           print("使用 --force 覆盖")
           return
       os.makedirs(config_dir, exist_ok=True)
-      template = """# 参考小说批次摘要提取（init 流程，建议 flash 模型）
+      template = """# 参考小说故事情节单元提取（init 流程，建议 flash 模型）
   DATA_BUILDER_MODEL=deepseek-chat
   DATA_BUILDER_BASE_URL=https://api.deepseek.com
   DATA_BUILDER_API_KEY=your-api-key
 
-  # 仿写核心任务：大纲、卷纲、章纲、正文（建议 pro 模型）
+  # 仿写核心任务：玩法、舞台、情节单元、章纲、正文、去AI味精修（建议 pro 模型）
   ADAPTIVE_BUILDER_MODEL=deepseek-chat
   ADAPTIVE_BUILDER_BASE_URL=https://api.deepseek.com
   ADAPTIVE_BUILDER_API_KEY=your-api-key
@@ -79,7 +79,7 @@ def cmd_init(args):
     from training.outline_builder import split_chapters_to_files
     split_chapters_to_files(ws)
 
-    # Step 1: 提取大纲（切分章节、批次摘要、卷纲）
+    # Step 1: 提取大纲（切分章节、故事情节单元、卷纲）
     print()
     from training.outline_builder import run_outline_build
     run_outline_build(txt_path=dest, output_dir=ws.reference,
@@ -111,6 +111,17 @@ def cmd_init(args):
 def _ws(name):
     from core.workspace import init_workspace
     return init_workspace(name)
+
+
+def _resolve_volume_arg(args):
+    """解析新流程卷号。--stage 仅保留为旧命令兼容别名。"""
+    volume = getattr(args, "volume", None)
+    stage = getattr(args, "stage", None)
+    if volume is not None and stage is not None and volume != stage:
+        print("错误：当前流程中“舞台”等同于卷号，不支持同时指定不同的 --volume 和 --stage。")
+        print("请使用 --volume N；--stage 仅为兼容旧命令保留。")
+        return None
+    return volume if volume is not None else (stage if stage is not None else 1)
 
 
 # ── 仿写流程 ──────────────────────────────────────────────
@@ -148,6 +159,41 @@ def cmd_novel_name_synopsis(args):
     gen_novel_name_synopsis(ws, force=args.force)
 
 
+def cmd_story_design(args):
+    from training.adaptive_builder import gen_story_design
+    ws = _ws(args.workspace)
+    gen_story_design(ws, force=args.force, creative_direction=args.direction,
+                     direction_file=args.direction_file)
+
+
+def cmd_stage_insert(args):
+    from training.adaptive_builder import insert_stage
+    ws = _ws(args.workspace)
+    if args.after_stage is not None and args.before_stage is not None:
+        print("错误：--after-stage 和 --before-stage 不能同时使用。")
+        return
+    insert_stage(
+        ws,
+        creative_direction=args.direction,
+        direction_file=args.direction_file,
+        after_stage=args.after_stage,
+        before_stage=args.before_stage,
+    )
+
+
+def cmd_mechanics_init(args):
+    from training.adaptive_builder import init_mechanics
+    ws = _ws(args.workspace)
+    init_mechanics(
+        ws,
+        force=args.force,
+        creative_direction=args.direction,
+        direction_file=args.direction_file,
+        mechanics_file=args.file,
+        disable=args.none,
+    )
+
+
 def cmd_volume_outline(args):
     from training.adaptive_builder import gen_volume_outline
     ws = _ws(args.workspace)
@@ -155,17 +201,34 @@ def cmd_volume_outline(args):
                        creative_direction=args.direction)
 
 
+def cmd_story_arcs(args):
+    from training.adaptive_builder import gen_story_arcs
+    volume = _resolve_volume_arg(args)
+    if volume is None:
+        return
+    ws = _ws(args.workspace)
+    gen_story_arcs(ws, volume=volume, force=args.force)
+
+
 def cmd_chapter_outlines(args):
     from training.adaptive_builder import gen_serial_chapter_outlines
+    volume = _resolve_volume_arg(args)
+    if volume is None:
+        return
     ws = _ws(args.workspace)
-    gen_serial_chapter_outlines(ws, volume=args.volume, force=args.force)
+    gen_serial_chapter_outlines(ws, volume=volume, force=args.force)
 
 
 def cmd_write(args):
     from training.adaptive_builder import gen_serial_chapters
+    volume = _resolve_volume_arg(args)
+    if volume is None:
+        return
     ws = _ws(args.workspace)
-    gen_serial_chapters(ws, volume=args.volume, start_chapter=args.start,
-                        max_chapters=args.max)
+    gen_serial_chapters(ws, volume=volume, start_chapter=args.start,
+                        max_chapters=args.max,
+                        humanize=not args.no_humanize,
+                        humanize_existing=args.humanize_existing)
 
 
 # ── 主入口 ──────────────────────────────────────────────
@@ -188,10 +251,10 @@ def main():
     p = sub.add_parser("init", help="创建工作空间")
     p.add_argument("workspace", help="工作区名称")
     p.add_argument("--txt", help="参考小说文件路径")
-    p.add_argument("--batch-size", type=int, default=20, help="每批处理章节数（默认20）")
+    p.add_argument("--batch-size", type=int, default=20, help="每次读取章节数，用于识别故事情节单元（默认20）")
 
     # novel-outline
-    p = sub.add_parser("novel-outline", help="仿写生成新小说大纲")
+    p = sub.add_parser("novel-outline", help="生成核心玩法、长线主线、舞台路线图和角色线")
     p.add_argument("workspace", help="工作区名称")
     p.add_argument("--force", action="store_true")
     p.add_argument("--direction", help="创作方向（字符串）")
@@ -218,6 +281,30 @@ def main():
     p.add_argument("workspace", help="工作区名称")
     p.add_argument("--force", action="store_true")
 
+    # story-design
+    p = sub.add_parser("story-design", help="生成核心玩法、长线主线、舞台路线图和角色成长线")
+    p.add_argument("workspace", help="工作区名称")
+    p.add_argument("--force", action="store_true")
+    p.add_argument("--direction", help="创作方向（字符串）")
+    p.add_argument("--direction-file", help="创作方向文件路径")
+
+    # stage-insert
+    p = sub.add_parser("stage-insert", help="基于灵感设计新舞台并插入舞台路线图")
+    p.add_argument("workspace", help="工作区名称")
+    p.add_argument("--direction", help="新舞台灵感（字符串）")
+    p.add_argument("--direction-file", help="新舞台灵感文件路径")
+    p.add_argument("--after-stage", type=int, default=None, help="优先插入在指定舞台之后")
+    p.add_argument("--before-stage", type=int, default=None, help="优先插入在指定舞台之前")
+
+    # mechanics-init
+    p = sub.add_parser("mechanics-init", help="初始化可选机制层（系统/面板/数值/轻量状态追踪）")
+    p.add_argument("workspace", help="工作区名称")
+    p.add_argument("--force", action="store_true", help="覆盖已有机制层")
+    p.add_argument("--direction", help="机制设定方向（字符串）")
+    p.add_argument("--direction-file", help="机制设定方向文件路径")
+    p.add_argument("--file", help="机制设定文件路径，优先级高于 --direction")
+    p.add_argument("--none", action="store_true", help="显式关闭机制层")
+
     # volume-outline
     p = sub.add_parser("volume-outline", help="仿写生成卷纲")
     p.add_argument("workspace", help="工作区名称")
@@ -225,18 +312,29 @@ def main():
     p.add_argument("--force", action="store_true")
     p.add_argument("--direction", help="创作方向")
 
-    # chapter-outlines
-    p = sub.add_parser("chapter-outlines", help="串行逐章生成章纲")
+    # story-arcs
+    p = sub.add_parser("story-arcs", help="生成故事情节单元")
     p.add_argument("workspace", help="工作区名称")
-    p.add_argument("--volume", type=int, default=1, help="卷号（默认1）")
+    p.add_argument("--volume", type=int, default=None, help="卷号（默认1；新流程中一卷对应一个舞台）")
+    p.add_argument("--stage", type=int, default=None, help="兼容旧别名：等同于 --volume，不表示卷内 stage")
+    p.add_argument("--force", action="store_true", help="强制重新生成")
+
+    # chapter-outlines
+    p = sub.add_parser("chapter-outlines", help="基于故事情节单元串行逐章生成章纲")
+    p.add_argument("workspace", help="工作区名称")
+    p.add_argument("--volume", type=int, default=None, help="卷号（默认1；新流程中一卷对应一个舞台）")
+    p.add_argument("--stage", type=int, default=None, help="兼容旧别名：等同于 --volume，不表示卷内 stage")
     p.add_argument("--force", action="store_true", help="强制重新生成")
 
     # write
     p = sub.add_parser("write", help="串行生成正文")
     p.add_argument("workspace", help="工作区名称")
-    p.add_argument("--volume", type=int, default=1, help="卷号（默认1）")
+    p.add_argument("--volume", type=int, default=None, help="卷号（默认1；新流程中一卷对应一个舞台）")
+    p.add_argument("--stage", type=int, default=None, help="兼容旧别名：等同于 --volume，不表示卷内 stage")
     p.add_argument("--start", type=int, default=1, help="起始章节号")
     p.add_argument("--max", type=int, default=None, help="最大章节数")
+    p.add_argument("--no-humanize", action="store_true", help="关闭正文生成后的自动去AI味后处理")
+    p.add_argument("--humanize-existing", action="store_true", help="对已存在的正文执行去AI味；默认只处理本次新生成章节")
 
     args = parser.parse_args()
 
@@ -251,7 +349,11 @@ def main():
         "world-build": cmd_world_build,
         "novel-outline": cmd_novel_outline,
         "novel-name-synopsis": cmd_novel_name_synopsis,
+        "story-design": cmd_story_design,
+        "stage-insert": cmd_stage_insert,
+        "mechanics-init": cmd_mechanics_init,
         "volume-outline": cmd_volume_outline,
+        "story-arcs": cmd_story_arcs,
         "chapter-outlines": cmd_chapter_outlines,
         "write": cmd_write,
         "config": cmd_config
