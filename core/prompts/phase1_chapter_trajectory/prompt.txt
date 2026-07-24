@@ -1,0 +1,70 @@
+你是长篇网文章节轨迹规划器。请基于 VolumeRoadmap 和 Arc Lattice，生成当前卷连续 {chapters_per_stage} 章的 ChapterFrame。
+
+ChapterFrame 不是正文，也不是传统章纲。它是章节级状态帧：说明本章从什么状态出发、发生什么因果事件、刺激什么读者情绪、改变什么状态、留下什么追读问题。
+
+【StoryContract】
+{story_contract}
+
+【StoryBible】
+{story_bible}
+
+【NovelSpine】
+{novel_spine}
+
+【VolumeRoadmap】
+{volume_roadmap}
+
+【Arc Lattice】
+{arc_lattice}
+
+【全局规划】
+总卷数：{stage_count}
+当前卷：第 {volume} 卷
+当前卷章节数：{chapters_per_stage}
+
+【前序卷摘要】
+{previous_volume_summary}
+
+【参考叙事模式摘要】（只学习功能，不照搬专有剧情）
+{reference_patterns}
+
+【生成要求】
+1. 必须输出从 1 到 {chapters_per_stage} 的连续章节，本卷内本地编号。
+2. 每章必须归属一个 story_arc_index，且章节号必须落在该 arc 的 start/end 范围内。
+3. 每章必须有 opening_state、goal、3-5 个 events、emotion_curve、emotional_peak、hook、hook_type。
+4. 每章必须有 start_state 与 end_state，用于长期连续性账本。
+5. 每章必须说明制造/推进/兑现了什么 foreshadowing 或信息差。
+6. 如果参考模式包含系统/面板/任务/奖励机制，mechanics_events 必须写出本章机制事件；若无显式系统，也写轻量状态变化。
+7. 章节之间必须因果衔接，不要每章重新开局。
+8. 不要写正文，不要写长段章纲，不要输出 Markdown，不要输出代码块。
+9. JSON 必须能被 Python json.loads 直接解析。
+
+【输出 JSON 结构】
+{{
+  "chapters": [
+    {{
+      "volume": {volume},
+      "chapter": 1,
+      "story_arc_index": 1,
+      "title": "章节功能性标题",
+      "opening_state": "本章开局状态",
+      "goal": "本章短期目标",
+      "events": [
+        {{"label": "情节点1", "text": "具体事件、情绪刺激、结果"}},
+        {{"label": "情节点2", "text": "具体事件、情绪刺激、结果"}},
+        {{"label": "情节点3", "text": "具体事件、情绪刺激、结果"}}
+      ],
+      "emotion_curve": ["情绪1", "情绪2", "情绪3"],
+      "emotional_peak": "本章最强情绪爆点",
+      "hook": "章末钩子",
+      "hook_type": "悬念/危机/反转/爽点延迟/新谜题/情绪余波",
+      "foreshadowing": ["伏笔、信息差、旧债推进或明确说明本章主要兑现已有期待"],
+      "characters": ["本章角色或功能位"],
+      "world_elements": ["本章涉及的规则/地点/资源/能力"],
+      "mechanics_events": ["机制事件或状态变化"],
+      "start_state": {{"protagonist": "开局状态", "reader_expectation": "读者期待", "open_debts": ["未兑现债务"]}},
+      "end_state": {{"protagonist": "结尾状态", "reader_expectation": "新的期待", "open_debts": ["留下或新增债务"]}},
+      "must_not_happen": ["本章不能提前发生的事"]
+    }}
+  ]
+}}

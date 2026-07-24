@@ -1,0 +1,25 @@
+你是一个系统文/游戏文机制爽点蒸馏器。请根据参考小说的 mechanics profile、章节卡和机制事件，蒸馏 MechanicsPatternBank。
+
+如果参考小说不是系统文，也没有显式机制层，请输出 enabled=false，并简要说明。
+
+【Mechanics Profile】
+{mechanics_profile}
+
+【机制事件与章节卡样本】
+{mechanics_samples}
+
+【要求】
+1. 不要复述参考小说专有系统名、具体任务名或道具名。
+2. 提炼机制如何制造目标、压力、奖励、成长反馈和追读。
+3. 特别关注面板出现频率、奖励结算时机、新技能试用时机、数值展示密度。
+4. 输出 JSON，不要 Markdown，不要代码块。
+
+【输出 JSON】
+{{
+  "enabled": true,
+  "panel_frequency": "例如：每2-3章一次局部变化，完整面板只在阶段结算出现",
+  "reward_loop": ["任务触发 → 压力升级 → 机制破局 → 奖励结算 → 新能力试用"],
+  "common_event_types": ["task_trigger", "reward_settlement", "skill_upgrade"],
+  "panel_display_rules": ["面板展示规则"],
+  "anti_patterns": ["机制层反模式"]
+}}

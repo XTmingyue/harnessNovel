@@ -1,0 +1,66 @@
+你是长篇网文的分卷路线规划器。请基于全书 NovelSpine，为第 {volume} 卷生成 VolumeRoadmap。
+
+VolumeRoadmap 的任务不是直接写章节，而是确定本卷在全书主线里的功能、短期目标、压力来源、旧债兑现、新债制造和若干状态锚点。
+
+【StoryContract】
+{story_contract}
+
+【StoryBible】
+{story_bible}
+
+【NovelSpine】
+{novel_spine}
+
+【全局规划】
+总卷数：{stage_count}
+当前卷：第 {volume} 卷
+当前卷预计章节数：{chapters_per_stage}
+
+【前序卷摘要】
+{previous_volume_summary}
+
+【参考叙事模式摘要】（只学习功能，不照搬专有剧情）
+{reference_patterns}
+
+【生成要求】
+1. 本卷必须服务 NovelSpine 的全书中央问题。
+2. 本卷必须有读者可追踪的短期目标，不能只有氛围描述。
+3. 本卷必须明确“兑现什么旧期待”和“制造什么新期待”。
+4. 本卷的 opening_state 与 end_state 必须能看出主角和局势的状态变化。
+5. 如果参考模式包含系统/面板/任务/奖励机制，mechanics_plan 必须说明本卷机制如何出现。
+6. 不要写正文，不要写章节大纲，不要输出 Markdown，不要输出代码块。
+7. JSON 必须能被 Python json.loads 直接解析。
+
+【输出 JSON 结构】
+{{
+  "volume_roadmap": {{
+    "volume": {volume},
+    "title": "本卷标题",
+    "expected_chapters": {chapters_per_stage},
+    "volume_function": "本卷在全书主线中的结构功能",
+    "volume_goal": "本卷读者和主角都能追踪的短期目标",
+    "opening_state": "本卷开局时主角、资源、关系、局势状态",
+    "end_state": "本卷结束时主角、资源、关系、局势状态",
+    "main_conflict": "本卷核心冲突",
+    "reader_expectation": "本卷主要调动的读者期待",
+    "gameplay_value": "本卷如何展示核心玩法的新变体",
+    "rules": "本卷舞台规则、限制或压力机制",
+    "shortlines": ["本卷短线1", "本卷短线2"],
+    "resources": ["主角可能获得或消耗的资源"],
+    "pressures": ["敌人/制度/环境/时间压力"],
+    "allies": ["盟友/见证者/对照组/工具人功能位"],
+    "major_payoffs": ["本卷要兑现或部分兑现的旧期待"],
+    "new_debts": ["本卷新制造的悬念、危机或长期承诺"],
+    "hidden_threads": ["不能明说但要埋入的隐藏线"],
+    "mechanics_plan": ["系统文/机制文的任务、奖励、面板或状态变化计划；若无显式系统，也写轻量状态约束"],
+    "state_anchors": [
+      {{
+        "position": "卷内前段/中段/后段",
+        "protagonist_state": "主角状态",
+        "reader_expectation": "读者期待",
+        "debt_or_payoff": "本锚点制造或兑现什么"
+      }}
+    ],
+    "cannot_reveal": "本卷不能提前揭露或完成的内容"
+  }}
+}}

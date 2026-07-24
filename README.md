@@ -57,7 +57,7 @@
 - **核心玩法与长短线替代原先的大纲设计**：`novel-outline` 不再以一次性全书大纲为核心资产，而是先设计核心玩法，再生成全书长线主线、舞台路线图和角色成长线。长线负责持续悬念和期待，舞台内短线负责阶段性爽点、冲突和情绪刺激。
 - **舞台驱动故事情节单元**：`stage_roadmap.md` 中的每个舞台承担原先“分卷卷纲”的作用。`story-arcs` 会基于当前舞台，从参考小说故事情节中抽象叙事模式，再生成新书自己的故事情节单元，而不是把参考剧情简单换名。
 - **系统文机制层**：新增 `mechanics-init`。系统文、游戏文、领主文、无限流等可初始化机制层，用结构化规则和状态约束系统面板、经验值、技能、任务、资源等内容，避免完全依赖大模型做数字计算。
-- **正文去AI味后处理**：`write` 默认在每章正文生成后增加一层精修，规则来源于 [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh)，用于降低公式化句式、总结腔、宣传腔和机械情绪描写。
+- **章节细纲层**：`write` 现在先把 ChapterFrame/章纲整理成 1000-2000 字的章节故事梗概，正文渲染后移到下一层，避免从轨迹帧直接跳到正文。
 - **目标世界资料库仍作为可选增强**：`world-import` / `world-build` 可导入目标题材资料，供核心玩法、舞台路线和角色线校正目标世界合理性；没有资料库时流程自动降级为参考小说 + 用户方向。
 
 
@@ -84,7 +84,8 @@
 - 角色成长线
 - 故事情节单元
 - 详细章纲
-- 正文内容
+- 章节细纲
+- 后续正文渲染输入
 
 **文风 & 写作规范**
 从多部小说中深度分析并提炼文风特征与写作规范，帮助去除写作的AI味。
@@ -111,7 +112,7 @@
 
 ## 特性
 
-- **全流程自动化**：从拆书分析、玩法设计到正文生成，串联命令完成完整长篇小说
+- **全流程自动化**：从拆书分析、玩法设计到章节细纲，串联命令推进长篇小说结构化创作
 - **参考仿写**：基于参考小说的节奏、结构、张力曲线生成新内容，而非凭空创作
 - **目标世界资料库（可选增强）**：支持导入目标题材资料/设定/样本网文，先结构化为知识库，再用于校验核心玩法、长线主线、舞台路线图和角色线；没有资料库时会自动降级为参考小说 + 用户方向流程
 - **叙事抽象防硬换皮**：参考小说先抽象为叙事模式，再结合当前舞台生成新故事情节，降低直接换名搬运的风险；故事情节审计暂时关闭，便于人工调试标准
@@ -120,7 +121,7 @@
 - **叙事模式仿写**：仿写阶段先压缩当前卷玩法/舞台上下文，再把参考故事情节抽象为叙事模式，生成新书自己的故事情节单元，降低硬换皮相似度
 - **舞台式推进**：先设计全书舞台，再按当前舞台生成故事情节单元与章纲，适合长篇网文边写边迭代
 - **机制层**：系统文、游戏文、领主文等可初始化机制层，把面板、经验、技能、任务、资源和状态变化交给结构化规则约束
-- **正文去AI味**：基于 [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh) 增加章节级后处理，默认对新生成正文执行语言精修，并保留原稿备份
+- **章节细纲先行**：默认先生成简短版章节内容，再进入后续正文渲染，降低从章纲直接写正文造成的漂移
 - **断点续写**：所有阶段自动跳过已生成内容，支持中断后继续
 
 ## 环境要求
@@ -161,7 +162,7 @@ ADAPTIVE_BUILDER_LITE_MODEL=deepseek-v4-flash
 ADAPTIVE_BUILDER_LITE_BASE_URL=https://api.deepseek.com
 ADAPTIVE_BUILDER_LITE_API_KEY=your-api-key
 
-# 仿写核心任务：玩法、舞台、情节单元、章纲、正文（建议 pro 模型，质量高）
+# 仿写核心任务：玩法、舞台、情节单元、章纲、章节细纲（建议 pro 模型，质量高）
 ADAPTIVE_BUILDER_MODEL=deepseek-v4-pro
 ADAPTIVE_BUILDER_BASE_URL=https://api.deepseek.com
 ADAPTIVE_BUILDER_API_KEY=your-api-key
@@ -170,6 +171,43 @@ ADAPTIVE_BUILDER_API_KEY=your-api-key
 也可通过同名环境变量覆盖配置。三组配置可使用不同的模型和服务商。
 
 ## 快速开始
+
+### Phase 1 叙事轨迹流
+
+```bash
+# 1. 初始化工作区（有参考小说时会拆解参考结构；没有参考小说也可先创建空工作区）
+novel init 我的新小说 --txt /path/to/参考小说.txt --distill-ready
+
+# 2. 蒸馏参考小说追读机制 PatternBank
+novel reference-distill 我的新小说
+
+# 3. 从灵感分层生成 StoryContract、NovelSpine、VolumeRoadmap、ArcFrame 和 ChapterFrame
+novel trajectory-plan 我的新小说 --direction "灵感输入"
+
+# 4. 审计结构化叙事状态帧
+novel trajectory-audit 我的新小说
+
+# 5. 基于 ChapterFrame 解码出的章纲生成章节细纲
+novel write 我的新小说 --volume 1 --start 1 --max 5
+```
+
+也可以一步生成轨迹后立刻生成前 5 章细纲：
+
+```bash
+novel trajectory-plan 我的新小说 --direction "灵感输入" --write-first 5
+```
+
+`trajectory-plan` 默认生成 3 卷，每卷 20 章。它会先生成全书主线，再生成分卷路线、情节单元网格和章节轨迹。可用 `--stages` 和 `--chapters-per-stage` 调整规模。
+
+如果不想在 `init` 阶段消耗额外模型调用，可以拆成两步：
+
+```bash
+novel init 我的新小说 --txt /path/to/参考小说.txt
+novel reference-prepare 我的新小说 --max-chapters 60 --max-arcs 20
+novel reference-distill 我的新小说 --max-arcs 20
+```
+
+### 传统拆书仿写流
 
 ```bash
 # 1. 初始化工作区（自动拆书：章节切分→故事情节单元→智能分卷→参考世界观提取）
@@ -185,8 +223,35 @@ novel story-arcs 我的新小说 --volume 1
 # 4. 基于故事情节单元生成逐章章纲
 novel chapter-outlines 我的新小说 --volume 1
 
-# 5. 生成正文；默认会在每章生成后执行去AI味精修
+# 5. 生成章节细纲
 novel write 我的新小说 --volume 1 --start 1
+```
+
+## 结构化叙事状态层
+
+新流程会在保留 Markdown 资产的同时，自动同步一份机器可读的叙事状态轨迹：
+
+- `file_system/bible/story_bible.json`：全书核心玩法、长线主线、读者契约等 StoryBible。
+- `file_system/bible/story_contract.json`：题材、目标读者、核心吸引力和读者承诺。
+- `file_system/trajectory/novel_spine.json`：全书主线、中央问题、长线债务和兑现排期。
+- `file_system/trajectory/volumes/`：每卷的 VolumeRoadmap。
+- `file_system/trajectory/stages/`：兼容旧流程的 StageFrame，由 VolumeRoadmap 解码得到。
+- `file_system/trajectory/arcs/`：每个故事情节单元的 ArcFrame。
+- `file_system/trajectory/chapters/`：每章的 ChapterFrame，记录目标、情绪曲线、情节点、伏笔、章末钩子和机制事件。
+- `file_system/chapter_detail_outlines/`：由 `write` 生成的章节细纲，即 1000-2000 字的章节故事梗概。
+- `file_system/ledger/global_state.json`：连续性账本，汇总已规划/已写章节的状态变化、钩子和伏笔。
+- `file_system/critics/trajectory/`：基础结构审计报告。
+- `reference/reference_manifest.json`：参考小说章节、卷、情节单元稳定索引。
+- `reference/cards/chapters/`：参考章节级追读机制卡片。
+- `reference/cards/arcs/`：参考情节单元结构卡片。
+- `reference/mechanics/`：系统文/游戏文机制检测与机制事件。
+- `reference/pattern_bank/`：`trajectory-plan` 优先消费的参考小说 PatternBank。
+
+`novel-outline`、`story-arcs`、`chapter-outlines`、`write` 会在完成后自动同步对应状态帧。已有工作区可手动迁移：
+
+```bash
+novel trajectory-sync 我的新小说 --volume 1
+novel trajectory-audit 我的新小说 --volume 1
 ```
 
 ## 故事情节单元生成流程
@@ -202,26 +267,19 @@ novel write 我的新小说 --volume 1 --start 1
 
 系统会默认选取一个参考故事情节作为叙事样本，抽象出情节功能、冲突结构、信息差、情绪曲线、爽点机制、关键转折和章末钩子，再结合当前舞台重新生成新书的故事情节单元。
 
-## 正文去AI味后处理
+## 章节细纲层
 
-`novel write` 新增去AI味精修，该步骤规则来源于 [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh)
+`novel write` 当前不直接生成正文，而是把 `chapter_outlines/` 中的章纲整理成 1000-2000 字的章节故事梗概。
 
-核心原则包括：删除填充短语、打破公式结构、变化句子节奏、信任读者、删除金句，并针对网文场景额外约束剧情、爽点、章末钩子和机制数值不得被改动。
+细纲会写入：
 
-去除AI味后正文经朱雀AI检测，可保证平均 **80%+** 内容判定为疑似 AI。
+- `file_system/chapter_detail_outlines/vol_xx/chapter_yyy.md`
 
-- 精修结果写入正式章节文件 `file_system/chapters/vol_xx/`
-- 原稿会备份到 `file_system/drafts/vol_xx/raw_chapters/`
+每章细纲会像简短版章节内容一样，用事件流串起开局、冲突、情绪爆点、结果变化和章末钩子，方便作者或后续模型直接扩写成正文。
 
 ```bash
-# 默认开启：生成正文后自动去AI味
-novel write 我的新小说 --volume 1 --start 1
-
-# 关闭去AI味，直接保存原始正文
-novel write 我的新小说 --volume 1 --start 1 --no-humanize
-
-# 对已经存在的正文重新执行去AI味
-novel write 我的新小说 --volume 1 --start 1 --max 3 --humanize-existing
+# 生成前 5 章章节细纲
+novel write 我的新小说 --volume 1 --start 1 --max 5
 ```
 
 ## 可选：机制层 mechanics
@@ -304,8 +362,8 @@ novel story-arcs 我的新小说 --volume 1 --force
 # 覆盖指定卷/舞台的章纲
 novel chapter-outlines 我的新小说 --volume 1 --force
 
-# 对已有正文执行去AI味
-novel write 我的新小说 --volume 1 --start 1 --max 3 --humanize-existing
+# 覆盖指定章节细纲
+novel write 我的新小说 --volume 1 --start 1 --max 3 --force
 ```
 
 ## 注意
@@ -320,6 +378,9 @@ novel write 我的新小说 --volume 1 --start 1 --max 3 --humanize-existing
 | `novel config`                                                        | 初始化全局配置文件          |
 | `novel list`                                                          | 列出所有工作区            |
 | `novel init <ws> --txt <path> [--batch-size N]`                       | 创建工作区，自动拆书 + 世界观提取 |
+| `novel init <ws> --txt <path> --distill-ready`                        | 创建工作区，并准备 reference-distill 所需结构化输入 |
+| `novel reference-prepare <ws> [--lite] [--max-chapters N] [--max-arcs N] [--force]` | 准备参考小说 manifest、章节卡、情节卡和机制索引 |
+| `novel reference-distill <ws> [--volumes 1,2] [--max-arcs N] [--force]` | 蒸馏参考小说追读机制 PatternBank |
 | `novel world-import <ws> <paths...> [--force]`                        | 导入目标题材资料文件或目录      |
 | `novel world-build <ws> [--force] [--merge-only] [--primary NAME] [--chapter-batch-size N] [--chunk-size N] [--max-workers N]` | 将目标题材资料结构化为分栏知识库 |
 | `novel novel-outline <ws> [--direction TEXT] [--direction-file PATH]` | 生成核心玩法、长线主线、舞台路线图和角色成长线 |
@@ -329,7 +390,10 @@ novel write 我的新小说 --volume 1 --start 1 --max 3 --humanize-existing
 | `novel volume-outline <ws> [--volume N] [--force]`                    | 旧流程兼容：生成卷纲、每卷世界观和每卷舞台计划 |
 | `novel story-arcs <ws> [--volume N] [--force]`                        | 按卷/舞台生成故事情节单元和叙事模式 |
 | `novel chapter-outlines <ws> [--volume N] [--force]`                  | 基于故事情节单元生成逐章章纲      |
-| `novel write <ws> [--volume N] [--start N] [--max N] [--no-humanize] [--humanize-existing]` | 串行生成正文，默认生成后执行去AI味 |
+| `novel write <ws> [--volume N] [--start N] [--max N] [--force]` | 串行生成章节细纲，不直接生成正文 |
+| `novel trajectory-plan <ws> [--direction TEXT] [--stages N] [--chapters-per-stage N] [--write-first N] [--force]` | Phase 1：从灵感生成结构化叙事轨迹 |
+| `novel trajectory-sync <ws> [--volume N]`                              | 从现有 Markdown 资产同步结构化叙事状态帧 |
+| `novel trajectory-audit <ws> [--volume N]`                             | 审计结构化叙事状态帧 |
 
 ### 参数说明
 
@@ -349,8 +413,7 @@ novel write 我的新小说 --volume 1 --start 1 --max 3 --humanize-existing
 - `--after-stage N` / `--before-stage N`：插入新舞台时指定相对位置（仅 stage-insert）
 - `--start N`：起始章节号，默认 1（仅 write）
 - `--max N`：最大生成章节数（仅 write）
-- `--no-humanize`：关闭正文生成后的自动去AI味后处理（仅 write）
-- `--humanize-existing`：对已存在正文执行去AI味；默认只处理本次新生成章节（仅 write）
+- `--no-humanize` / `--humanize-existing`：旧正文生成参数，当前 `write` 细纲模式会忽略
 - `--force`：强制重新生成，覆盖已有内容
 
 

@@ -222,6 +222,15 @@ def _read_json_file(path):
         return None
 
 
+def _try_sync_trajectory(label, callback):
+    """Best-effort sync for the structured trajectory layer."""
+    try:
+        return callback()
+    except Exception as e:
+        print(f"  警告：结构化叙事状态同步失败（{label}）：{e}")
+        return None
+
+
 def _default_mechanics_disabled(reason):
     return {
         "profile": {
@@ -512,6 +521,9 @@ def gen_story_design(ws, force=False, creative_direction=None, direction_file=No
     _gen_stage_roadmap(ws, llm, direction, world_knowledge, force=force)
     _gen_character_arcs(ws, llm, direction, world_knowledge, force=force)
 
+    from training.trajectory_builder import sync_story_design_frames
+    _try_sync_trajectory("故事设计", lambda: sync_story_design_frames(ws))
+
 
 def gen_novel_outline(ws, force=False, creative_direction=None, direction_file=None, preserved_content=None):
     """生成核心玩法、全书长线主线、舞台路线图和角色成长线。"""
@@ -537,6 +549,9 @@ def gen_novel_outline(ws, force=False, creative_direction=None, direction_file=N
     # 推荐书名与简介
     print()
     gen_novel_name_synopsis(ws, force=True)
+
+    from training.trajectory_builder import sync_story_design_frames
+    _try_sync_trajectory("核心玩法与舞台设计", lambda: sync_story_design_frames(ws))
 
     print(f"\n  -> 请审核编辑核心玩法、长线主线、舞台路线图和角色成长线后，再生成故事情节单元。")
 
@@ -1646,6 +1661,8 @@ def gen_story_arcs(ws, volume=1, force=False):
         print(f"  -> 故事情节单元{arc_idx}已保存：{arc_file}")
 
     _write_story_arc_index(ws, volume, generated_items)
+    from training.trajectory_builder import sync_arc_frames
+    _try_sync_trajectory("故事情节单元", lambda: sync_arc_frames(ws, volume=volume))
     print(f"\n>>> 卷{volume}故事情节单元已生成，共 {len(generated_items)} 个。<<<")
 
 
@@ -1713,6 +1730,9 @@ def gen_serial_chapter_outlines(ws, volume=1, force=False):
             _write_file(out_file, result)
             print(f"  -> 第{ch_num}章章纲已保存：{out_file}")
 
+    from training.trajectory_builder import sync_chapter_frames, sync_ledger
+    _try_sync_trajectory("逐章章纲", lambda: sync_chapter_frames(ws, volume=volume))
+    _try_sync_trajectory("连续性账本", lambda: sync_ledger(ws, volume=volume))
     print(f"\n>>> 卷{volume}全部 {total_chapters} 章章纲已生成。<<<")
 
 
@@ -1744,6 +1764,193 @@ def _humanize_chapter_text(
     )
     result = normalize_text(llm.generate(prompt))
     return result or chapter_text
+
+
+def _chapter_detail_outline_dir(ws, volume):
+    return os.path.join(ws.file_system, "chapter_detail_outlines", f"vol_{volume:02d}")
+
+
+def _chapter_detail_outline_path(ws, volume, chapter_num):
+    return os.path.join(_chapter_detail_outline_dir(ws, volume), f"chapter_{chapter_num:03d}.md")
+
+
+def _trajectory_context_for_detail_outline(ws, volume, chapter_num):
+    try:
+        from core.repository import NarrativeRepository
+    except Exception:
+        return "（未能加载结构化轨迹仓储，降级使用章纲与故事情节单元。）"
+
+    try:
+        repo = NarrativeRepository(ws)
+        parts = []
+        spine = repo.read_novel_spine()
+        if spine:
+            parts.append("=== NovelSpine ===\n" + json.dumps(spine.to_dict(), ensure_ascii=False, indent=2))
+        roadmap = repo.read_volume_roadmap(volume)
+        if roadmap:
+            parts.append("=== VolumeRoadmap ===\n" + json.dumps(roadmap.to_dict(), ensure_ascii=False, indent=2))
+        arc = None
+        for item in repo.list_arc_frames(volume):
+            if item.start_chapter <= chapter_num <= item.end_chapter:
+                arc = item
+                break
+        if arc:
+            parts.append("=== ArcFrame ===\n" + json.dumps(arc.to_dict(), ensure_ascii=False, indent=2))
+        frame = repo.read_chapter_frame(volume, chapter_num)
+        if frame:
+            parts.append("=== ChapterFrame ===\n" + json.dumps(frame.to_dict(), ensure_ascii=False, indent=2))
+        return "\n\n".join(parts) if parts else "（未找到结构化轨迹帧，降级使用章纲与故事情节单元。）"
+    except Exception as e:
+        return f"（读取结构化轨迹帧失败，降级使用章纲与故事情节单元：{e}）"
+
+
+def _list_chapter_frame_numbers(ws, volume):
+    try:
+        from core.repository import NarrativeRepository
+        repo = NarrativeRepository(ws)
+        return [frame.chapter for frame in repo.list_chapter_frames(volume)]
+    except Exception:
+        return []
+
+
+def _chapter_outline_fallback_from_frame(ws, volume, chapter_num):
+    try:
+        from core.repository import NarrativeRepository
+        repo = NarrativeRepository(ws)
+        frame = repo.read_chapter_frame(volume, chapter_num)
+    except Exception:
+        frame = None
+    if not frame:
+        return ""
+
+    events = []
+    for idx, event in enumerate(frame.events or [], 1):
+        if isinstance(event, dict):
+            text = event.get("text") or event.get("event") or ""
+        else:
+            text = str(event)
+        if str(text).strip():
+            events.append(f"# 情节点{idx}\n{str(text).strip()}")
+
+    return "\n\n".join(
+        [
+            f"【第{frame.chapter}章 章纲】",
+            "# 本章目标与开局",
+            frame.opening_state or frame.goal or "待补充",
+            *events,
+            "# 情绪曲线与爆点",
+            f"{'→'.join(frame.emotion_curve) if frame.emotion_curve else '待补充'}；{frame.emotional_peak or '待补充'}",
+            "# 伏笔与信息差",
+            "；".join(frame.foreshadowing) if frame.foreshadowing else "无",
+            "# 章末钩子",
+            frame.hook or "待补充",
+            "# 机制事件草案",
+            "；".join(frame.mechanics_events) if frame.mechanics_events else "无",
+        ]
+    )
+
+
+def gen_serial_chapter_detail_outlines(
+    ws,
+    volume=1,
+    start_chapter=1,
+    max_chapters=None,
+    force=False,
+):
+    """串行生成章节细纲：从章纲/ChapterFrame 整理为 1000-2000 字章节故事梗概。"""
+    context = _load_volume_outline_context(ws, volume)
+    if not context:
+        return
+    vol_outline, vol_worldview, _ = context
+
+    outlines_dir = os.path.join(ws.file_system, "chapter_outlines", f"vol_{volume:02d}")
+    outline_files = []
+    if os.path.isdir(outlines_dir):
+        outline_files = sorted(f for f in os.listdir(outlines_dir) if re.match(r'^chapter_\d+\.md$', f))
+
+    frame_numbers = _list_chapter_frame_numbers(ws, volume)
+    if not outline_files and not frame_numbers:
+        print(f"错误：未找到章纲目录 {outlines_dir}，也未找到卷{volume}的 ChapterFrame。")
+        print("请先运行 trajectory-plan，或运行 chapter-outlines。")
+        return
+
+    total_chapters = max(frame_numbers or [0])
+    for f in outline_files:
+        m = re.match(r'^chapter_(\d+)\.md$', f)
+        if m:
+            total_chapters = max(total_chapters, int(m.group(1)))
+
+    llm = _get_llm()
+    if not llm:
+        return
+
+    rewrite_map = load_rewrite_map(ws, volume)
+    mechanics_context = _load_mechanics_context(ws)
+    out_dir = _chapter_detail_outline_dir(ws, volume)
+    os.makedirs(out_dir, exist_ok=True)
+
+    tasks = []
+    for ch_num in range(start_chapter, total_chapters + 1):
+        out_file = _chapter_detail_outline_path(ws, volume, ch_num)
+        if os.path.exists(out_file) and not force:
+            print(f"  第{ch_num}章细纲已存在，跳过。")
+            continue
+        tasks.append(ch_num)
+        if max_chapters and len(tasks) >= max_chapters:
+            break
+
+    if not tasks:
+        print("[Orchestrator] 没有待生成的章节细纲（全部已存在）。")
+        return
+
+    print(f">>> 串行生成章节细纲：卷{volume}，待生成 {len(tasks)} 章 <<<")
+
+    for idx, ch_num in enumerate(tasks, 1):
+        print(f"\n--- 生成第{ch_num}章细纲（{idx}/{len(tasks)}）---")
+        outline_path = os.path.join(outlines_dir, f"chapter_{ch_num:03d}.md")
+        chapter_outline = _read_file(outline_path)
+        if not chapter_outline:
+            chapter_outline = _chapter_outline_fallback_from_frame(ws, volume, ch_num)
+        if not chapter_outline:
+            print(f"  警告：第{ch_num}章章纲/ChapterFrame 均不存在，跳过。")
+            continue
+        chapter_outline = re.sub(r'\n?\[(?:FINISHED|CONTINUE)\]\s*$', '', chapter_outline).strip()
+
+        prev_details = []
+        for i in range(max(1, ch_num - 2), ch_num):
+            content = _read_file(_chapter_detail_outline_path(ws, volume, i))
+            if content:
+                prev_details.append(content.strip())
+        previous_detail_text = "\n\n".join(prev_details) if prev_details else "（无前序细纲，这是第一章或前序细纲尚未生成。）"
+
+        story_arc_summary = _find_story_arc_for_chapter(ws, volume, ch_num)
+        if not story_arc_summary:
+            story_arc_summary = _find_legacy_batch_for_chapter(ws, volume, ch_num, total_chapters)
+
+        trajectory_context = _trajectory_context_for_detail_outline(ws, volume, ch_num)
+
+        context_text = (
+            f"=== 当前卷/舞台路线 ===\n{vol_outline}\n\n"
+            f"=== 当前卷长线、规则与边界 ===\n{vol_worldview}\n\n"
+            f"=== 结构化轨迹帧 ===\n{trajectory_context}\n\n"
+            f"=== 当前故事情节单元 ===\n{story_arc_summary or '（未找到故事情节单元，请严格以章纲和 ChapterFrame 为准。）'}\n\n"
+            f"=== 当前章纲 ===\n{chapter_outline}\n\n"
+            f"=== 前序章节细纲 ===\n{previous_detail_text}\n\n"
+            f"=== 机制层 mechanics ===\n{mechanics_context}\n\n"
+            f"=== 兼容旧流程：换皮映射表 ===\n{rewrite_map or '（新流程不依赖换皮映射表；参考小说只提供叙事功能。）'}"
+        )
+
+        prompt = PromptLoader.load(
+            "chapter_detail_outline",
+            context=context_text,
+            chapter_num=ch_num,
+        )
+        result = normalize_text(llm.generate(prompt))
+        out_file = _chapter_detail_outline_path(ws, volume, ch_num)
+        _write_file(out_file, result)
+        print(f"  -> 第{ch_num}章细纲已保存：{out_file}")
+
+    print(f"\n  -> 卷{volume}章节细纲处理完毕（共 {len(tasks)} 章）。")
 
 
 def gen_serial_chapters(
@@ -1933,6 +2140,8 @@ def gen_serial_chapters(
         else:
             print(f"  -> 第{ch_num}章正文已保存：{out_file}")
 
+    from training.trajectory_builder import sync_ledger
+    _try_sync_trajectory("正文连续性账本", lambda: sync_ledger(ws, volume=volume))
     print(f"\n  -> 卷{volume}正文处理完毕（共 {len(tasks)} 章）。")
 
 

@@ -1,0 +1,54 @@
+你是长篇网文的情节单元网格规划器。请基于当前卷的 VolumeRoadmap，生成覆盖本卷所有章节的 ArcFrame 列表。
+
+ArcFrame 是卷内情节单元，不是章节，也不是正文。它负责把本卷路线切成若干可追踪的因果段：每个段都有起点、终点、核心事件、情绪推进、状态变化、伏笔和章节节奏。
+
+【StoryContract】
+{story_contract}
+
+【StoryBible】
+{story_bible}
+
+【NovelSpine】
+{novel_spine}
+
+【VolumeRoadmap】
+{volume_roadmap}
+
+【全局规划】
+总卷数：{stage_count}
+当前卷：第 {volume} 卷
+当前卷预计章节数：{chapters_per_stage}
+
+【参考叙事模式摘要】（只学习功能，不照搬专有剧情）
+{reference_patterns}
+
+【生成要求】
+1. arcs 必须覆盖第 1 章到第 {chapters_per_stage} 章，尽量不要断档。
+2. 每个 arc 建议覆盖 3-8 章，除非章节总数很少。
+3. 每个 arc 必须说明 core_event、conflict、emotion_curve、protagonist_state_change。
+4. 每个 arc 必须明确它服务哪个旧债/新债/本卷目标。
+5. Arc 之间必须有因果递进，不要只是并列事件清单。
+6. 不要写正文，不要写章纲，不要输出 Markdown，不要输出代码块。
+7. JSON 必须能被 Python json.loads 直接解析。
+
+【输出 JSON 结构】
+{{
+  "arcs": [
+    {{
+      "volume": {volume},
+      "arc_index": 1,
+      "start_chapter": 1,
+      "end_chapter": 5,
+      "title": "情节单元标题",
+      "core_event": "这一情节单元真正发生的核心事件",
+      "pattern_landing": "从参考模式学习到的功能性节奏，不写专有剧情",
+      "conflict": "外部冲突与内部压力",
+      "emotion_curve": ["期待", "受压", "反击", "爽感", "新悬念"],
+      "protagonist_state_change": "主角状态变化",
+      "foreshadowing": ["本 arc 埋下或推进的伏笔/信息差"],
+      "chapter_pacing": ["第1章承担什么", "第2章承担什么"],
+      "world_elements": ["规则/地点/资源/能力/机制"],
+      "self_check": "为什么这个 arc 能推动本卷目标和全书主线"
+    }}
+  ]
+}}

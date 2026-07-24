@@ -1,0 +1,64 @@
+你是一个网文章节追读机制分析师。请把参考小说单章正文提取成 ReferenceChapterCard。
+
+这不是剧情复述，而是为后续 reference-distill 提供章节级追读机制信号。
+
+【章节信息】
+chapter_id: {chapter_id}
+volume: {volume}
+chapter: {chapter}
+global_index: {global_index}
+title: {title}
+
+【机制检测结果】
+{mechanics_profile}
+
+【章节正文】
+{chapter_text}
+
+【提取要求】
+1. opening_state 写本章开局的主角/局势/读者期待状态。
+2. core_event 写本章核心事件链，不要长篇复述。
+3. emotion_curve 写读者情绪变化，例如 ["憋屈", "试探", "爽感", "危机"]。
+4. strongest_emotional_beat 写最强情绪刺激点。
+5. payoff 写本章兑现了什么爽点/信息/成长；没有则说明主要承担铺垫功能。
+6. hook 写章末钩子，reader_question_at_end 写读者最想知道的问题。
+7. state_delta 写主角能力、资源、身份、关系、认知、处境的变化。
+8. 如果是系统文/游戏文/显式机制文，mechanics_events 必须抽取任务、奖励、技能、属性、面板、资源、积分等事件；否则可为空。
+9. 只输出 JSON，不要 Markdown，不要代码块。
+
+【输出 JSON】
+{{
+  "chapter_id": "{chapter_id}",
+  "volume": {volume},
+  "chapter": {chapter},
+  "global_index": {global_index},
+  "title": "{title}",
+  "opening_state": "",
+  "core_event": "",
+  "emotion_curve": [],
+  "strongest_emotional_beat": "",
+  "payoff": "",
+  "hook": "",
+  "hook_type": "悬念/危机/反转/新谜题/信息揭露/爽点延迟/情绪余波/无",
+  "state_delta": {{
+    "power": "",
+    "resource": "",
+    "identity": "",
+    "relationship": "",
+    "knowledge": "",
+    "situation": ""
+  }},
+  "foreshadowing": [],
+  "reader_question_at_end": "",
+  "mechanics_events": [
+    {{
+      "type": "task_trigger | reward_settlement | skill_upgrade | panel_snapshot | attribute_change | inventory_gain | resource_change | other",
+      "timing": "chapter_start | chapter_middle | chapter_end",
+      "trigger": "",
+      "delta": {{}},
+      "narrative_function": "制造目标/兑现爽点/制造倒计时压力/开启新地图/成长反馈",
+      "emotion_effect": "期待/爽感/紧张/贪婪/危机",
+      "display_mode": "none | delta_only | partial_panel | full_panel"
+    }}
+  ]
+}}

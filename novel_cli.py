@@ -22,7 +22,7 @@ def cmd_config(args):
   DATA_BUILDER_BASE_URL=https://api.deepseek.com
   DATA_BUILDER_API_KEY=your-api-key
 
-  # 仿写核心任务：玩法、舞台、情节单元、章纲、正文、去AI味精修（建议 pro 模型）
+  # 仿写核心任务：玩法、舞台、情节单元、章纲、章节细纲、正文渲染（建议 pro 模型）
   ADAPTIVE_BUILDER_MODEL=deepseek-chat
   ADAPTIVE_BUILDER_BASE_URL=https://api.deepseek.com
   ADAPTIVE_BUILDER_API_KEY=your-api-key
@@ -104,6 +104,17 @@ def cmd_init(args):
     print()
     from training.adaptive_builder import gen_worldview
     gen_worldview(ws)
+
+    if args.distill_ready:
+        print()
+        from training.reference_prepare import prepare_reference_assets
+        prepare_reference_assets(
+            ws,
+            force=args.force_prepare,
+            lite=args.prepare_lite,
+            max_chapters=args.max_prepare_chapters,
+            max_arcs=args.max_prepare_arcs,
+        )
 
     print(f"\n工作空间目录：{ws.root}")
 
@@ -220,15 +231,82 @@ def cmd_chapter_outlines(args):
 
 
 def cmd_write(args):
-    from training.adaptive_builder import gen_serial_chapters
+    from training.adaptive_builder import gen_serial_chapter_detail_outlines
     volume = _resolve_volume_arg(args)
     if volume is None:
         return
     ws = _ws(args.workspace)
-    gen_serial_chapters(ws, volume=volume, start_chapter=args.start,
-                        max_chapters=args.max,
-                        humanize=not args.no_humanize,
-                        humanize_existing=args.humanize_existing)
+    if args.no_humanize or args.humanize_existing:
+        print("提示：当前 write 命令只生成章节细纲，不生成正文；去AI味相关参数已忽略。")
+    gen_serial_chapter_detail_outlines(
+        ws,
+        volume=volume,
+        start_chapter=args.start,
+        max_chapters=args.max,
+        force=args.force,
+    )
+
+
+def cmd_trajectory_sync(args):
+    from training.trajectory_builder import sync_trajectory_frames
+    ws = _ws(args.workspace)
+    sync_trajectory_frames(ws, volume=args.volume)
+
+
+def cmd_trajectory_audit(args):
+    from training.trajectory_builder import audit_trajectory_frames
+    ws = _ws(args.workspace)
+    audit_trajectory_frames(ws, volume=args.volume)
+
+
+def cmd_trajectory_plan(args):
+    from training.phase1_builder import generate_phase1_trajectory
+    ws = _ws(args.workspace)
+    generate_phase1_trajectory(
+        ws,
+        force=args.force,
+        creative_direction=args.direction,
+        direction_file=args.direction_file,
+        stage_count=args.stages,
+        chapters_per_stage=args.chapters_per_stage,
+        decode_outlines=not args.no_outlines,
+        write_first=args.write_first,
+        humanize=not args.no_humanize,
+    )
+
+
+def _parse_int_list(value):
+    if not value:
+        return None
+    result = []
+    for item in str(value).split(","):
+        item = item.strip()
+        if item:
+            result.append(int(item))
+    return result or None
+
+
+def cmd_reference_prepare(args):
+    from training.reference_prepare import prepare_reference_assets
+    ws = _ws(args.workspace)
+    prepare_reference_assets(
+        ws,
+        force=args.force,
+        lite=args.lite,
+        max_chapters=args.max_chapters,
+        max_arcs=args.max_arcs,
+    )
+
+
+def cmd_reference_distill(args):
+    from training.reference_distiller import distill_reference_patterns
+    ws = _ws(args.workspace)
+    distill_reference_patterns(
+        ws,
+        force=args.force,
+        volumes=_parse_int_list(args.volumes),
+        max_arcs=args.max_arcs,
+    )
 
 
 # ── 主入口 ──────────────────────────────────────────────
@@ -252,6 +330,11 @@ def main():
     p.add_argument("workspace", help="工作区名称")
     p.add_argument("--txt", help="参考小说文件路径")
     p.add_argument("--batch-size", type=int, default=20, help="每次读取章节数，用于识别故事情节单元（默认20）")
+    p.add_argument("--distill-ready", action="store_true", help="初始化后继续准备 reference-distill 所需结构化输入")
+    p.add_argument("--force-prepare", action="store_true", help="配合 --distill-ready 使用，覆盖 reference prepare 产物")
+    p.add_argument("--prepare-lite", action="store_true", help="配合 --distill-ready 使用，只生成 manifest 和 distill bundle 骨架")
+    p.add_argument("--max-prepare-chapters", type=int, default=None, help="配合 --distill-ready 使用，最多抽取多少章章节卡")
+    p.add_argument("--max-prepare-arcs", type=int, default=None, help="配合 --distill-ready 使用，最多抽取多少个情节卡")
 
     # novel-outline
     p = sub.add_parser("novel-outline", help="生成核心玩法、长线主线、舞台路线图和角色线")
@@ -327,14 +410,52 @@ def main():
     p.add_argument("--force", action="store_true", help="强制重新生成")
 
     # write
-    p = sub.add_parser("write", help="串行生成正文")
+    p = sub.add_parser("write", help="串行生成章节细纲（不直接生成正文）")
     p.add_argument("workspace", help="工作区名称")
     p.add_argument("--volume", type=int, default=None, help="卷号（默认1；新流程中一卷对应一个舞台）")
     p.add_argument("--stage", type=int, default=None, help="兼容旧别名：等同于 --volume，不表示卷内 stage")
     p.add_argument("--start", type=int, default=1, help="起始章节号")
     p.add_argument("--max", type=int, default=None, help="最大章节数")
-    p.add_argument("--no-humanize", action="store_true", help="关闭正文生成后的自动去AI味后处理")
-    p.add_argument("--humanize-existing", action="store_true", help="对已存在的正文执行去AI味；默认只处理本次新生成章节")
+    p.add_argument("--force", action="store_true", help="覆盖已有章节细纲")
+    p.add_argument("--no-humanize", action="store_true", help="兼容旧正文生成参数；当前细纲模式忽略")
+    p.add_argument("--humanize-existing", action="store_true", help="兼容旧正文生成参数；当前细纲模式忽略")
+
+    # trajectory-sync
+    p = sub.add_parser("trajectory-sync", help="从现有 Markdown 资产同步结构化叙事状态帧")
+    p.add_argument("workspace", help="工作区名称")
+    p.add_argument("--volume", type=int, default=None, help="只同步指定卷/舞台")
+
+    # trajectory-audit
+    p = sub.add_parser("trajectory-audit", help="审计结构化叙事状态帧")
+    p.add_argument("workspace", help="工作区名称")
+    p.add_argument("--volume", type=int, default=None, help="只审计指定卷/舞台")
+
+    # trajectory-plan
+    p = sub.add_parser("trajectory-plan", help="Phase 1：从灵感分层生成全书主线、分卷路线、情节单元和章节轨迹")
+    p.add_argument("workspace", help="工作区名称")
+    p.add_argument("--direction", help="创作方向（字符串）")
+    p.add_argument("--direction-file", help="创作方向文件路径")
+    p.add_argument("--stages", type=int, default=3, help="生成卷数（默认3，参数名保留为兼容旧命令）")
+    p.add_argument("--chapters-per-stage", type=int, default=20, help="每卷章节数（默认20，参数名保留为兼容旧命令）")
+    p.add_argument("--force", action="store_true", help="覆盖已有 Phase 1 轨迹")
+    p.add_argument("--no-outlines", action="store_true", help="只生成结构化帧，不解码为 chapter_outlines")
+    p.add_argument("--write-first", type=int, default=0, help="轨迹生成后立刻生成前 N 章章节细纲")
+    p.add_argument("--no-humanize", action="store_true", help="兼容旧正文生成参数；当前 --write-first 细纲模式忽略")
+
+    # reference-prepare
+    p = sub.add_parser("reference-prepare", help="准备 reference-distill 所需 manifest、章节卡、情节卡和机制索引")
+    p.add_argument("workspace", help="工作区名称")
+    p.add_argument("--force", action="store_true", help="覆盖已有 reference prepare 产物")
+    p.add_argument("--lite", action="store_true", help="只生成 manifest 和 distill input 骨架，跳过 LLM 抽卡")
+    p.add_argument("--max-chapters", type=int, default=None, help="最多抽取多少章章节卡")
+    p.add_argument("--max-arcs", type=int, default=None, help="最多抽取多少个情节卡")
+
+    # reference-distill
+    p = sub.add_parser("reference-distill", help="蒸馏参考小说追读机制 PatternBank")
+    p.add_argument("workspace", help="工作区名称")
+    p.add_argument("--force", action="store_true", help="覆盖已有 PatternBank")
+    p.add_argument("--volumes", help="只蒸馏指定参考卷，逗号分隔，如 1,2")
+    p.add_argument("--max-arcs", type=int, default=None, help="最多蒸馏多少个情节样本")
 
     args = parser.parse_args()
 
@@ -356,6 +477,11 @@ def main():
         "story-arcs": cmd_story_arcs,
         "chapter-outlines": cmd_chapter_outlines,
         "write": cmd_write,
+        "trajectory-sync": cmd_trajectory_sync,
+        "trajectory-audit": cmd_trajectory_audit,
+        "trajectory-plan": cmd_trajectory_plan,
+        "reference-prepare": cmd_reference_prepare,
+        "reference-distill": cmd_reference_distill,
         "config": cmd_config
     }
     dispatch[args.command](args)

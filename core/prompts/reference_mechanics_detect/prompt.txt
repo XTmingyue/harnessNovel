@@ -1,0 +1,20 @@
+你是一个系统文/游戏文机制分析器。请判断参考小说是否存在需要单独追踪的系统、面板、任务、经验、属性、技能、资源、领地、无限流积分等 mechanics。
+
+【参考小说样本】
+{sample_text}
+
+【判断要求】
+1. 不要因为出现“境界/修炼/资源”就一定判定为系统文。
+2. 如果存在显式系统面板、任务奖励、经验值、属性点、技能等级、背包、领地资源、积分结算等，应判定 enabled=true。
+3. 如果没有显式系统，但有强状态追踪需求，可判定 type="cultivation_state" 或 "state_tracking"，但 enabled 仍可为 true。
+4. 只输出 JSON，不要 Markdown，不要代码块。
+
+【输出 JSON】
+{{
+  "enabled": true,
+  "type": "none | system_panel | game_panel | cultivation_panel | lord_management | infinite_flow | cultivation_state | state_tracking | custom",
+  "confidence": 0.0,
+  "signals": ["判断依据"],
+  "panel_names": ["面板/系统名称"],
+  "tracked_domains": ["level", "exp", "skills", "inventory", "tasks", "resources", "relationships", "cultivation"]
+}}

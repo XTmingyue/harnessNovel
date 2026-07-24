@@ -38,19 +38,125 @@ def normalize_text(text: str) -> str:
     return text
 
 
+def _strip_code_fence(text: str) -> str:
+    cleaned = text.strip()
+    if not cleaned.startswith("```"):
+        return cleaned
+    first_newline = cleaned.find("\n")
+    if first_newline != -1:
+        cleaned = cleaned[first_newline + 1:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    return cleaned.strip()
+
+
+def _extract_json_candidate(text: str) -> str:
+    """Extract the first top-level JSON object/array from noisy LLM text."""
+    starts = [idx for idx in (text.find("{"), text.find("[")) if idx != -1]
+    if not starts:
+        return text
+    start = min(starts)
+    opening = text[start]
+    closing = "}" if opening == "{" else "]"
+    stack = [closing]
+    in_string = False
+    escape = False
+    for idx in range(start + 1, len(text)):
+        ch = text[idx]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif stack and ch == stack[-1]:
+            stack.pop()
+            if not stack:
+                return text[start:idx + 1]
+    return text[start:]
+
+
+def _escape_control_chars_inside_strings(text: str) -> str:
+    """Escape raw newlines/tabs inside JSON strings without changing formatting outside strings."""
+    out = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if escape:
+            out.append(ch)
+            escape = False
+            continue
+        if ch == "\\":
+            out.append(ch)
+            escape = True
+            continue
+        if ch == '"':
+            out.append(ch)
+            in_string = not in_string
+            continue
+        if in_string and ch == "\n":
+            out.append("\\n")
+        elif in_string and ch == "\r":
+            out.append("\\r")
+        elif in_string and ch == "\t":
+            out.append("\\t")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _light_json_repair(text: str) -> str:
+    repaired = text.strip()
+    repaired = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', repaired)
+    repaired = repaired.replace("，}", "}").replace("，]", "]")
+    repaired = repaired.replace(",}", "}").replace(",]", "]")
+    repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+    repaired = re.sub(r"\bTrue\b", "true", repaired)
+    repaired = re.sub(r"\bFalse\b", "false", repaired)
+    repaired = re.sub(r"\bNone\b", "null", repaired)
+    return repaired
+
+
 def parse_json_response(raw: str) -> dict:
-    """清理并解析 LLM 返回的 JSON，处理控制字符、代码块包裹等常见问题。"""
-    import re as _re
-    cleaned = raw.strip()
-    # 去除 markdown 代码块包裹
-    if cleaned.startswith("```"):
-        first_newline = cleaned.find("\n")
-        if first_newline != -1:
-            cleaned = cleaned[first_newline + 1:]
-        if cleaned.endswith("```"):
-            cleaned = cleaned[:-3].strip()
-    # 清除 JSON 值内部的非法控制字符
-    cleaned = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', cleaned)
-    # 修复尾逗号
-    cleaned = cleaned.replace(",}", "}").replace(",]", "]")
-    return json.loads(cleaned)
+    """Parse JSON returned by an LLM, with repair for common JSON-ish outputs."""
+    if raw is None:
+        raise json.JSONDecodeError("empty JSON response", "", 0)
+
+    cleaned = _strip_code_fence(str(raw))
+    candidate = _extract_json_candidate(cleaned)
+    variants = [
+        cleaned,
+        candidate,
+        _light_json_repair(candidate),
+        _light_json_repair(_escape_control_chars_inside_strings(candidate)),
+    ]
+
+    last_error = None
+    seen = set()
+    for item in variants:
+        if item in seen:
+            continue
+        seen.add(item)
+        try:
+            return json.loads(item)
+        except json.JSONDecodeError as e:
+            last_error = e
+            decoder = json.JSONDecoder()
+            try:
+                parsed, _ = decoder.raw_decode(item)
+                return parsed
+            except json.JSONDecodeError:
+                pass
+
+    if last_error:
+        raise last_error
+    return json.loads(candidate)

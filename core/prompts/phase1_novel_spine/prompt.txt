@@ -1,0 +1,66 @@
+你是长篇网文的全书主线架构师。请基于 StoryContract 与 StoryBible，生成 NovelSpine。
+
+NovelSpine 不是正文，也不是章节大纲。它的任务是把一个灵感收束成“整本书为什么能连载下去”的主线结构：中央问题、终局方向、主角长期状态变化、长线债务和分卷功能。
+
+【StoryContract】
+{story_contract}
+
+【StoryBible】
+{story_bible}
+
+【目标世界资料】（可选）
+{world_knowledge}
+
+【ReferencePatternBank】（只学习功能，不照搬专有剧情）
+{reference_patterns}
+
+【规划规模】
+本次 MVP 规划 {stage_count} 卷，每卷约 {chapters_per_stage} 章。
+
+【生成要求】
+1. 必须先明确全书中央问题：读者为什么会持续追问。
+2. 必须给出终局方向，但不要过早揭露所有真相。
+3. 必须给出主角长期状态变化：身份、能力、资源、关系、认知至少覆盖两项。
+4. 必须给出每卷的结构功能，而不是只写情节简介。
+5. 必须列出长线债务和兑现排期，让后续卷有明确的欠账和回收。
+6. 不要写正文，不要写章纲，不要输出 Markdown，不要输出代码块。
+7. JSON 必须能被 Python json.loads 直接解析。
+
+【输出 JSON 结构】
+{{
+  "novel_spine": {{
+    "premise": "一句话说明这本书的核心命题",
+    "central_question": "贯穿全书早期的核心追问",
+    "final_destination": "读者隐约能感到的终局方向",
+    "protagonist_arc": "主角长期状态变化",
+    "core_conflict": "贯穿主线的核心矛盾",
+    "antagonist_pressure": "主要压力来源，可以是人、制度、世界规则或命运机制",
+    "progression_axis": ["升级轴/身份轴/资源轴/地图轴/关系轴等"],
+    "long_debts": ["长期伏笔、未兑现承诺、读者等待的问题"],
+    "payoff_schedule": [
+      {{
+        "due_range": "第几卷或第几章附近",
+        "debt": "要兑现/部分兑现的债务",
+        "payoff_shape": "兑现方式",
+        "new_debt": "兑现后制造的新债务"
+      }}
+    ],
+    "volume_functions": [
+      {{
+        "volume": 1,
+        "function": "这一卷在全书主线中的结构功能",
+        "state_shift": "主角/局势状态变化",
+        "reader_question": "这一卷结束时读者继续追问什么"
+      }}
+    ],
+    "state_anchors": [
+      {{
+        "anchor": "卷或章节位置",
+        "protagonist_state": "主角状态",
+        "world_state": "世界/敌我局势",
+        "reader_expectation": "读者期待"
+      }}
+    ],
+    "must_not_break": ["不能破坏的读者契约、世界规则或节奏禁忌"]
+  }}
+}}

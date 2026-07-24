@@ -1,0 +1,52 @@
+你是一个网文追读机制蒸馏器。请根据参考小说的情节卡、章节卡和正文片段，蒸馏出可迁移的 ReferencePatternBank。
+
+这一步不是复述参考小说，也不是生成新小说。你的目标是总结“这本参考小说如何让读者持续读下去”。
+
+【参考小说全书大纲】
+{reference_outline}
+
+【样本情节蒸馏输入】
+{distill_inputs}
+
+【要求】
+1. 只提炼可迁移的结构功能、情绪节奏、钩子机制、成长反馈、伏笔组织方式。
+2. 不要保留参考小说的人名、地名、势力名、专有物品、原剧情因果。
+3. anti_patterns 写后续新书不能照搬或容易写崩的地方。
+4. 输出 JSON，不要 Markdown，不要代码块。
+
+【输出 JSON】
+{{
+  "summary": "参考小说追读机制总结",
+  "story_contract_signals": ["它承诺给读者的体验"],
+  "emotion_patterns": [
+    {{
+      "name": "模式名",
+      "curve": ["压抑", "试探", "爽感", "危机"],
+      "usage": "什么时候使用",
+      "risk": "滥用风险"
+    }}
+  ],
+  "hook_patterns": [
+    {{
+      "type": "悬念/危机/反转/爽点延迟/新谜题",
+      "mechanism": "如何形成追读",
+      "placement": "章初/章中/章末/情节末"
+    }}
+  ],
+  "progression_patterns": [
+    {{
+      "name": "成长/资源/身份反馈模式",
+      "state_delta": "状态如何变化",
+      "reader_reward": "读者得到什么反馈"
+    }}
+  ],
+  "foreshadowing_patterns": [
+    {{
+      "name": "伏笔模式",
+      "planting": "如何埋",
+      "delay": "如何延迟",
+      "payoff": "如何兑现"
+    }}
+  ],
+  "anti_patterns": ["后续创作不要照搬或要避免的模式"]
+}}

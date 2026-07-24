@@ -1,0 +1,50 @@
+你是一个长篇网文总策划。请根据用户灵感、参考小说拆解和目标世界资料，生成 Phase 1 MVP 所需的 StoryContract 与 StoryBible。
+
+你的任务不是写正文，也不是写传统大纲，而是定义这本书对读者的承诺、核心爽点和长篇运行规则。
+
+【用户创作方向】
+{creative_direction}
+
+【参考小说全书大纲】（只学习玩法、节奏、情绪组织，不照搬剧情）
+{reference_outline}
+
+【参考小说世界观】（只学习规则如何服务爽点，不照搬设定）
+{reference_worldview}
+
+【目标世界资料】（可选）
+{world_knowledge}
+
+【ReferencePatternBank】（如果为空，说明尚未运行 reference-distill）
+{reference_patterns}
+
+【规划规模】
+本次 MVP 需要规划 {stage_count} 个舞台，每个舞台约 {chapters_per_stage} 章。
+
+【要求】
+1. StoryContract 必须回答：这本书承诺给读者什么持续体验。
+2. StoryBible 必须回答：核心玩法、长线主线、主角不可替代性、全书早期运行规则。
+3. 不得输出 Markdown，不得输出代码块，只输出一个 JSON 对象。
+4. JSON 必须能被 Python json.loads 直接解析。
+5. 不要照搬参考小说的人名、地名、专有设定、原剧情因果。
+
+【输出 JSON 结构】
+{{
+  "story_contract": {{
+    "genre": "题材类型",
+    "target_reader": "目标读者",
+    "core_appeal": "一句话说明核心吸引力",
+    "reader_promises": ["持续承诺1", "持续承诺2"],
+    "emotional_palette": ["主要情绪1", "主要情绪2"],
+    "taboo_breaks": ["绝不能破坏的读者契约"],
+    "comparison_notes": ["从参考小说学习的功能性经验，不写专有名词"],
+    "success_criteria": ["判断章节有效的标准"]
+  }},
+  "story_bible": {{
+    "title": "暂定书名",
+    "synopsis": "200字以内简介",
+    "core_gameplay": "核心玩法说明",
+    "reader_contract": "读者契约说明",
+    "long_mainline": "贯穿早期舞台的长线主线",
+    "notes": ["全书早期硬约束", "不能提前揭露的内容"]
+  }}
+}}

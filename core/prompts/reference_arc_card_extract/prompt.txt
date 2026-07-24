@@ -1,0 +1,47 @@
+你是一个网文情节单元结构分析师。请把参考小说的故事情节单元提取成 ReferenceArcCard。
+
+这一步不是创作新小说，也不是换皮，而是为 reference-distill 提供情节级追读机制信号。
+
+【情节单元信息】
+arc_id: {arc_id}
+volume: {volume}
+arc_index: {arc_index}
+start_chapter: {start_chapter}
+end_chapter: {end_chapter}
+
+【故事情节单元摘要】
+{arc_text}
+
+【覆盖章节卡片】
+{chapter_cards}
+
+【提取要求】
+1. arc_function 写此情节在卷内的结构功能。
+2. boundary_reason 写为什么这个章节范围形成一个自然情节闭环。
+3. emotion_curve 写情绪波形。
+4. pressure_points 写压迫、危机、误会、羞辱、资源压力等。
+5. payoff_points 写爽点、成长反馈、信息揭示、奖励结算等。
+6. hook_points 写每个关键章末/情节末尾如何制造追读。
+7. progression_pattern 写主角状态如何从起点变到终点。
+8. copy_risk_elements 写后续新书绝不能直接继承的专有剧情/设定类型，用功能描述，不复述原专名。
+9. 只输出 JSON，不要 Markdown，不要代码块。
+
+【输出 JSON】
+{{
+  "arc_id": "{arc_id}",
+  "volume": {volume},
+  "arc_index": {arc_index},
+  "start_chapter": {start_chapter},
+  "end_chapter": {end_chapter},
+  "title": "",
+  "arc_function": "",
+  "boundary_reason": "",
+  "emotion_curve": [],
+  "pressure_points": [],
+  "payoff_points": [],
+  "hook_points": [],
+  "progression_pattern": "",
+  "foreshadowing_pattern": "",
+  "reader_retention_mechanism": "",
+  "copy_risk_elements": []
+}}
