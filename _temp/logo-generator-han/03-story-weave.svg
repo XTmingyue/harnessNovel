@@ -1,0 +1,11 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <title>Story Weave</title>
+  <g fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round">
+    <path d="M20 28c17 0 22 44 40 44 8 0 14-6 20-16"/>
+    <path d="M20 38c15 0 23 34 40 34 10 0 15-9 20-22" opacity=".82"/>
+    <path d="M20 48c14 0 24 24 40 24 11 0 16-12 20-28" opacity=".64"/>
+    <path d="M20 58c13 0 25 14 40 14 12 0 17-15 20-34" opacity=".46"/>
+  </g>
+  <circle cx="20" cy="28" r="5" fill="currentColor"/>
+  <circle cx="80" cy="38" r="5" fill="currentColor"/>
+</svg>

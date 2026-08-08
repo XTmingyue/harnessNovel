@@ -1,12 +1,18 @@
 <p align="center">
-  <img src="docs/logo.png" width="100">
-  &nbsp;&nbsp;
-  <img src="docs/name.png" width="300">
+  <img src="docs/logo.svg" width="96" alt="harnessNovel Logo">
 </p>
 
-<h1 align="center">AI Agent for Long-form Web Novel Writing</h1>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/wordmark-light.svg">
+    <img src="docs/wordmark-light.svg" width="320" alt="harnessNovel">
+  </picture>
+</p>
 
-<h2 align="center">Long-form Web Novel Writing AI Agent</h2>
+<h2 align="center">AI Agent for Long-form Web Novel Writing</h2>
+
+<h3 align="center">Long-form Web Novel Writing AI Agent</h3>
 
 <div align="center">
 
@@ -20,6 +26,8 @@
 English | [中文](README.md)
 
 </div>
+
+
 
 ***
 
@@ -43,19 +51,46 @@ Most AI novel writing tools currently on the market share several common pain po
 
 Instead of asking AI to create from nothing, harnessNovel first lets it systematically study the essence of an excellent novel, then create new work on a stronger foundation.
 
-## Current Iteration
+## Installation
 
-This iteration changes the imitation flow from “traditional full-book outline + volume outline + batch summary” to “core gameplay + long/short lines + stages + story-arc units”.
+```bash
+pip install harnessNovel
+```
 
-The goal is to reduce direct reskin similarity, make long web novels easier to adjust while writing, and provide stable numeric/state constraints for system novels.
+Update:
 
-Key changes:
+```bash
+pip install --upgrade harnessNovel
+```
 
-- **Core gameplay and long/short lines replace the old outline-centered design**: `novel-outline` no longer treats a one-shot full-book outline as the central asset. It first designs core gameplay, then generates the long-running mainline, stage roadmap, and character arcs. The long line maintains suspense and expectation; stage-level short lines create local payoffs, conflicts, and emotional beats.
-- **Stage-driven story-arc units**: Each stage in `stage_roadmap.md` replaces the role of the old volume outline. `story-arcs` abstracts narrative patterns from reference story arcs, then regenerates new story arcs against the current stage instead of renaming reference plots.
-- **Mechanics layer for system novels**: `mechanics-init` adds an optional mechanics layer. System novels, game novels, lord-management novels, and infinite-flow novels can use structured rules and state to constrain panels, exp, skills, tasks, resources, and other numeric/state elements instead of relying fully on the model for calculation.
-- **Chapter humanization post-processing**: `write` now runs a humanization pass after each generated chapter by default. The rules are sourced from [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh) to reduce formulaic structures, summary tone, promotional tone, and mechanical emotion labels.
-- **Target-world knowledge remains optional**: `world-import` / `world-build` can import target-genre materials to calibrate the plausibility of core gameplay, stage roadmap, and character arcs. Without a knowledge base, the flow falls back to reference novel + user direction.
+## Local Web Workbench
+
+The project provides a local visual workbench. Book design, stage design, story arcs, chapter outlines, and draft generation all support multi-round dialogue — you can iteratively adjust the results through conversation and confirm only when satisfied.
+
+```bash
+novel web
+```
+
+The default address is `http://127.0.0.1:8765`.
+On first launch it prefers `~/Documents/my-novels` as the workspace root; you can also change it in the page settings or specify it at launch:
+
+```bash
+novel web --workspace-root /path/to/my-novels
+```
+
+### Interface Preview
+
+<table align="center">
+  <tr>
+    <td><img src="docs/web-ui-1-reference.png" width="450" alt="Reference Deconstruction"></td>
+    <td><img src="docs/web-ui-3-design.png" width="450" alt="Book Design Chat"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/web-ui-4-chapters.png" width="450" alt="Chapter Outlines"></td>
+    <td><img src="docs/web-ui-2-config.png" width="450" alt="LLM API Configuration"></td>
+  </tr>
+</table>
+
 
 ## Core Features
 
@@ -153,12 +188,12 @@ DATA_BUILDER_MODEL=deepseek-v4-flash
 DATA_BUILDER_BASE_URL=https://api.deepseek.com
 DATA_BUILDER_API_KEY=your-api-key
 
-# Imitation auxiliary tasks: worldview extraction (flash model recommended)
+# Story arcs, chapter outlines, drafts, and lightweight tasks (flash model recommended)
 ADAPTIVE_BUILDER_LITE_MODEL=deepseek-v4-flash
 ADAPTIVE_BUILDER_LITE_BASE_URL=https://api.deepseek.com
 ADAPTIVE_BUILDER_LITE_API_KEY=your-api-key
 
-# Imitation core tasks: gameplay, stages, story arcs, chapter outlines, full text (pro model recommended for quality)
+# Book-level and stage design (pro model recommended for quality)
 ADAPTIVE_BUILDER_MODEL=deepseek-v4-pro
 ADAPTIVE_BUILDER_BASE_URL=https://api.deepseek.com
 ADAPTIVE_BUILDER_API_KEY=your-api-key
@@ -169,12 +204,24 @@ You can also override these settings with environment variables of the same name
 ## Quick Start
 
 ```bash
-# 1. Initialize a workspace
-#    Automatically deconstructs the reference novel: chapter splitting -> story arcs -> smart volume splitting -> reference worldview extraction
-novel init my-new-novel --txt /path/to/reference-novel.txt
+# 1. Initialize a workspace with three-stage deconstruction. You can start with the first 200 chapters.
+novel init my-new-novel --txt /path/to/reference-novel.txt --max-chapters 200
+
+# Continue later without uploading the source again.
+novel reference-resume my-new-novel --max-chapters 400
+
+# Import only, then choose full-book or first-N deconstruction later.
+novel init my-new-novel --txt /path/to/reference-novel.txt --no-analyze
 
 # 2. Generate core gameplay + long mainline + stage roadmap + character arcs
 novel novel-outline my-new-novel --direction "inspiration input"
+
+# Extend only the mainline, character arcs, and later stages from newly deconstructed reference material.
+# Core gameplay and title suggestions remain unchanged.
+novel story-design-extend my-new-novel --use-reference
+
+# Or extend later stages from the existing new-book design only.
+novel story-design-extend my-new-novel
 
 # 3. Generate story arcs for a stage
 #    This reads the matching stage from stage_roadmap.md and abstracts reference arcs into narrative patterns.
@@ -209,7 +256,7 @@ Core principles include: removing filler phrases, breaking formulaic structures,
 After AI-flavor removal, Zhuque AI detection can ensure that an average of **80%+** content is judged as suspected AI.
 
 - The refined result is written to the final chapter directory: `file_system/chapters/vol_xx/`.
-- The raw draft is backed up under `file_system/drafts/vol_xx/raw_chapters/`.
+- The latest pre-humanization draft is saved under `file_system/drafts/vol_xx/raw_chapters/`; changed older snapshots are archived in its `versions/` subdirectory.
 
 ```bash
 # Default: generate and humanize each new chapter.
@@ -273,54 +320,25 @@ novel world-build my-new-novel --primary main-source.txt
 novel novel-outline my-new-novel --direction "inspiration input"
 ```
 
-## Existing Workspace Rebuilds
-
-Use these commands only when an existing workspace needs to rebuild the knowledge base, overwrite old output, or regenerate a specific new asset.
-
-```bash
-# Rebuild the target-world knowledge base.
-novel world-build my-new-novel --force --primary main-source.txt --chapter-batch-size 20
-
-# Re-merge the final knowledge base from existing worlds/<source>/*.md files only.
-novel world-build my-new-novel --merge-only --primary main-source.txt
-
-# Overwrite core gameplay, long mainline, stage roadmap, and character arcs.
-novel novel-outline my-new-novel --force --direction "inspiration input"
-
-# Regenerate only core gameplay, long mainline, stage roadmap, and character arcs.
-novel story-design my-new-novel --force
-
-# Insert a new stage from inspiration.
-novel stage-insert my-new-novel --direction "new stage idea" --after-stage 1
-
-# Initialize or overwrite the mechanics layer.
-novel mechanics-init my-new-novel --force --file /path/to/mechanics.md
-
-# Overwrite story arcs for a volume/stage.
-novel story-arcs my-new-novel --volume 1 --force
-
-# Overwrite chapter outlines for a volume/stage.
-novel chapter-outlines my-new-novel --volume 1 --force
-
-# Humanize existing chapter files.
-novel write my-new-novel --volume 1 --start 1 --max 3 --humanize-existing
-```
-
 ## Notes
 
-- Reference novels currently only support `.txt` format and must use UTF-8 encoding.
+- Reference novels currently support `.txt` format. Common Chinese encodings are detected and converted to UTF-8 on import.
+
 
 ## Command Reference
 
 | Command                                                               | Description                                      |
 | --------------------------------------------------------------------- | ------------------------------------------------ |
 | `novel config`                                                        | Initialize the global config file                |
+| `novel web [--host HOST] [--port PORT] [--workspace-root PATH]`      | Start the local visual workbench                 |
 | `novel list`                                                          | List all workspaces                              |
-| `novel init <ws> --txt <path> [--batch-size N]`                       | Create a workspace and automatically deconstruct the reference novel + extract worldview |
+| `novel init <ws> --txt <path> [--batch-size N] [--max-chapters N] [--no-analyze]` | Create a workspace, normalize the source, and run the three-stage deconstruction; `--no-analyze` imports only |
+| `novel reference-resume <ws> [--batch-size N] [--max-chapters N]` | Resume or retry reference deconstruction |
 | `novel world-import <ws> <paths...> [--force]`                        | Import target-genre material files or directories |
 | `novel world-build <ws> [--force] [--merge-only] [--primary NAME] [--chapter-batch-size N] [--chunk-size N] [--max-workers N]` | Structure target-genre materials into a sectioned knowledge base |
 | `novel novel-outline <ws> [--direction TEXT] [--direction-file PATH]` | Generate core gameplay, long mainline, stage roadmap, and character arcs |
 | `novel story-design <ws> [--force] [--direction TEXT] [--direction-file PATH]` | Generate core gameplay, long mainline, stage roadmap, and character arcs |
+| `novel story-design-extend <ws> [--use-reference] [--direction TEXT] [--direction-file PATH]` | Preserve existing design and append the mainline, character arcs, and later stages |
 | `novel stage-insert <ws> [--direction TEXT] [--direction-file PATH] [--after-stage N] [--before-stage N]` | Design a new stage from inspiration and insert it into the stage roadmap |
 | `novel mechanics-init <ws> [--file PATH] [--direction TEXT] [--none] [--force]` | Initialize or disable the optional mechanics layer |
 | `novel volume-outline <ws> [--volume N] [--force]`                    | Legacy flow: generate volume outline, per-volume worldview, and per-volume stage plan |
@@ -332,8 +350,9 @@ novel write my-new-novel --volume 1 --start 1 --max 3 --humanize-existing
 
 - `--txt <path>`: Reference novel file path. Used only by `init`.
 - `--batch-size N`: Chapters per reading window for story-arc detection. Default: 20. Used only by `init`.
-- `--direction TEXT`: Creative direction, for example "change to a modern urban setting". In `novel-outline`, it affects the full-book plan; in `story-design`, it only tunes gameplay/stage/character assets.
-- `--direction-file PATH`: Read creative direction from a file. Used by `novel-outline` and `story-design`.
+- `--direction TEXT`: Creative direction, for example "change to a modern urban setting". In `novel-outline`, it affects the full-book plan; in `story-design`, it tunes gameplay/stage/character assets; in `story-design-extend`, it guides the added material.
+- `--direction-file PATH`: Read creative direction from a file. Used by `novel-outline`, `story-design`, and `story-design-extend`.
+- `--use-reference`: With `story-design-extend`, use only reference story arcs added since the last full-book design. Without it, extend from existing new-book design assets only.
 - `--file PATH`: Mechanics settings file path. Used by `mechanics-init`.
 - `--none`: Explicitly disable the mechanics layer. Used by `mechanics-init`.
 - `--chapter-batch-size N`: Number of chapters per batch for chapter-like materials. Default: 20. Falls back to character chunks when chapters cannot be detected. Used only by `world-build`.
@@ -349,6 +368,7 @@ novel write my-new-novel --volume 1 --start 1 --max 3 --humanize-existing
 - `--no-humanize`: Disable automatic humanization after chapter generation. Used only by `write`.
 - `--humanize-existing`: Humanize existing chapter files. By default, only newly generated chapters are humanized. Used only by `write`.
 - `--force`: Force regeneration and overwrite existing content.
+
 
 ## About the Author
 

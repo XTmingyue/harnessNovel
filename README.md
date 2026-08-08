@@ -1,12 +1,18 @@
 <p align="center">
-  <img src="docs/logo.png" width="100">
-  &nbsp;&nbsp;
-  <img src="docs/name.png" width="300">
+  <img src="docs/logo.svg" width="96" alt="harnessNovel Logo">
 </p>
 
-<h1 align="center">AI Agent for Long-form Web Novel Writing</h1>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/wordmark-light.svg">
+    <img src="docs/wordmark-light.svg" width="320" alt="harnessNovel">
+  </picture>
+</p>
 
-<h2 align="center">长篇网络小说写作 AI Agent</h2>
+<h2 align="center">AI Agent for Long-form Web Novel Writing</h2>
+
+<h3 align="center">长篇网络小说写作 AI Agent</h3>
 
 <div align="center">
 
@@ -45,20 +51,43 @@
 
 不让 AI 凭空创作，而是让它先系统学习一部优秀小说的精华，再基于此进行有根基的创新创作。
 
+## 安装
 
-## 本次迭代
+```bash
+pip install harnessNovel
+```
 
-本次迭代把仿写流程从“传统全书大纲 + 分卷卷纲 + 批次摘要”调整为“核心玩法 + 长短线 + 舞台 + 故事情节单元”。
+更新：
 
-目标是降低直接换皮相似度，让长篇网文更适合边写边调整，同时为系统文提供稳定的数值/状态约束。
+```bash
+pip install --upgrade harnessNovel
+```
 
-核心变化：
+## Web 工作台
 
-- **核心玩法与长短线替代原先的大纲设计**：`novel-outline` 不再以一次性全书大纲为核心资产，而是先设计核心玩法，再生成全书长线主线、舞台路线图和角色成长线。长线负责持续悬念和期待，舞台内短线负责阶段性爽点、冲突和情绪刺激。
-- **舞台驱动故事情节单元**：`stage_roadmap.md` 中的每个舞台承担原先“分卷卷纲”的作用。`story-arcs` 会基于当前舞台，从参考小说故事情节中抽象叙事模式，再生成新书自己的故事情节单元，而不是把参考剧情简单换名。
-- **系统文机制层**：新增 `mechanics-init`。系统文、游戏文、领主文、无限流等可初始化机制层，用结构化规则和状态约束系统面板、经验值、技能、任务、资源等内容，避免完全依赖大模型做数字计算。
-- **正文去AI味后处理**：`write` 默认在每章正文生成后增加一层精修，规则来源于 [op7418/Humanizer-zh](https://github.com/op7418/Humanizer-zh)，用于降低公式化句式、总结腔、宣传腔和机械情绪描写。
-- **目标世界资料库仍作为可选增强**：`world-import` / `world-build` 可导入目标题材资料，供核心玩法、舞台路线和角色线校正目标世界合理性；没有资料库时流程自动降级为参考小说 + 用户方向。
+项目提供本地可视化工作台。全书设计、舞台设计、故事情节、逐章章纲和正文生成均支持多轮对话，可对生成结果反复调整直到满意后再确认写入。
+
+```bash
+novel web
+```
+默认访问地址为 `http://127.0.0.1:8765`
+首次启动会优先使用 `~/Documents/my-novels` 作为工作区根目录，也可以在页面设置中切换，或启动时指定：
+```bash
+novel web --workspace-root /path/to/my-novels
+```
+
+### 界面预览
+
+<table align="center">
+  <tr>
+    <td><img src="docs/web-ui-1-reference.png" width="450" alt="参考小说拆解"></td>
+    <td><img src="docs/web-ui-3-design.png" width="450" alt="全书设计对话"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/web-ui-4-chapters.png" width="450" alt="逐章章纲"></td>
+    <td><img src="docs/web-ui-2-config.png" width="450" alt="大模型 API 配置"></td>
+  </tr>
+</table>
 
 
 ## 核心功能
@@ -156,12 +185,12 @@ DATA_BUILDER_MODEL=deepseek-v4-flash
 DATA_BUILDER_BASE_URL=https://api.deepseek.com
 DATA_BUILDER_API_KEY=your-api-key
 
-# 仿写辅助任务：世界观提取（建议 flash 模型）
+# 故事情节、逐章章纲、正文及轻量辅助任务（建议 flash 模型）
 ADAPTIVE_BUILDER_LITE_MODEL=deepseek-v4-flash
 ADAPTIVE_BUILDER_LITE_BASE_URL=https://api.deepseek.com
 ADAPTIVE_BUILDER_LITE_API_KEY=your-api-key
 
-# 仿写核心任务：玩法、舞台、情节单元、章纲、正文（建议 pro 模型，质量高）
+# 全书设计与舞台设计（建议 pro 模型，质量高）
 ADAPTIVE_BUILDER_MODEL=deepseek-v4-pro
 ADAPTIVE_BUILDER_BASE_URL=https://api.deepseek.com
 ADAPTIVE_BUILDER_API_KEY=your-api-key
@@ -172,11 +201,24 @@ ADAPTIVE_BUILDER_API_KEY=your-api-key
 ## 快速开始
 
 ```bash
-# 1. 初始化工作区（自动拆书：章节切分→故事情节单元→智能分卷→参考世界观提取）
-novel init 我的新小说 --txt /path/to/参考小说.txt
+# 1. 初始化工作区（自动识别编码并按三阶段拆书；可先只拆前 200 章）
+novel init 我的新小说 --txt /path/to/参考小说.txt --max-chapters 200
+
+# 后续继续拆到前 400 章，或移除 --max-chapters 以完成整本拆解
+novel reference-resume 我的新小说 --max-chapters 400
+
+# 只导入，稍后再决定拆整本还是前 N 章
+novel init 我的新小说 --txt /path/to/参考小说.txt --no-analyze
 
 # 2. 生成核心玩法 + 全书长线主线 + 舞台路线图 + 角色成长线
 novel novel-outline 我的新小说 --direction "灵感输入"
+
+# 参考小说后续拆解完成后，只追加长线、角色线和后续舞台
+# 不会改动核心玩法与书名建议
+novel story-design-extend 我的新小说 --use-reference
+
+# 不参考新增拆解，直接基于已有新书设计继续扩展后续舞台
+novel story-design-extend 我的新小说
 
 # 3. 生成指定舞台的故事情节单元
 #    会读取 stage_roadmap.md 中的对应舞台，再抽象参考情节的叙事模式
@@ -211,7 +253,7 @@ novel write 我的新小说 --volume 1 --start 1
 去除AI味后正文经朱雀AI检测，可保证平均 **80%+** 内容判定为疑似 AI。
 
 - 精修结果写入正式章节文件 `file_system/chapters/vol_xx/`
-- 原稿会备份到 `file_system/drafts/vol_xx/raw_chapters/`
+- 最近一次精修前的原稿保存在 `file_system/drafts/vol_xx/raw_chapters/`；内容变化时，旧快照归档到其 `versions/` 子目录
 
 ```bash
 # 默认开启：生成正文后自动去AI味
@@ -275,42 +317,9 @@ novel world-build 我的新小说 --primary 主资料.txt
 novel novel-outline 我的新小说 --direction "灵感输入"
 ```
 
-## 已有工作区重建
-
-已有工作区需要按新规则重建资料库、覆盖旧大纲或局部补齐新资产时，再使用以下命令。
-
-```bash
-# 重新构建目标世界知识库
-novel world-build 我的新小说 --force --primary 主资料.txt --chapter-batch-size 20
-
-# 只基于已生成的 worlds/<资料名>/*.md 重新融合最终资料库
-novel world-build 我的新小说 --merge-only --primary 主资料.txt
-
-# 覆盖核心玩法、长线主线、舞台路线图和角色成长线
-novel novel-outline 我的新小说 --force --direction "灵感输入"
-
-# 仅重建核心玩法、长线主线、舞台路线图、角色成长线
-novel story-design 我的新小说 --force
-
-# 基于灵感插入一个新舞台
-novel stage-insert 我的新小说 --direction "新舞台灵感" --after-stage 1
-
-# 初始化或覆盖机制层
-novel mechanics-init 我的新小说 --force --file /path/to/mechanics.md
-
-# 覆盖指定卷/舞台的故事情节单元
-novel story-arcs 我的新小说 --volume 1 --force
-
-# 覆盖指定卷/舞台的章纲
-novel chapter-outlines 我的新小说 --volume 1 --force
-
-# 对已有正文执行去AI味
-novel write 我的新小说 --volume 1 --start 1 --max 3 --humanize-existing
-```
-
 ## 注意
 
-- 参考小说的格式目前仅支持txt格式，编码需采用utf-8
+- 参考小说目前仅支持 `.txt`；导入时会自动检测常见中文编码并转换为 UTF-8。
 
 
 ## 命令参考
@@ -318,12 +327,15 @@ novel write 我的新小说 --volume 1 --start 1 --max 3 --humanize-existing
 | 命令                                                                    | 说明                 |
 | --------------------------------------------------------------------- | ------------------ |
 | `novel config`                                                        | 初始化全局配置文件          |
+| `novel web [--host HOST] [--port PORT] [--workspace-root PATH]`      | 启动本地可视化工作台        |
 | `novel list`                                                          | 列出所有工作区            |
-| `novel init <ws> --txt <path> [--batch-size N]`                       | 创建工作区，自动拆书 + 世界观提取 |
+| `novel init <ws> --txt <path> [--batch-size N] [--max-chapters N] [--no-analyze]` | 创建工作区，自动识别编码并按三阶段拆书；可只导入 |
+| `novel reference-resume <ws> [--batch-size N] [--max-chapters N]` | 继续或重试参考拆解 |
 | `novel world-import <ws> <paths...> [--force]`                        | 导入目标题材资料文件或目录      |
 | `novel world-build <ws> [--force] [--merge-only] [--primary NAME] [--chapter-batch-size N] [--chunk-size N] [--max-workers N]` | 将目标题材资料结构化为分栏知识库 |
 | `novel novel-outline <ws> [--direction TEXT] [--direction-file PATH]` | 生成核心玩法、长线主线、舞台路线图和角色成长线 |
 | `novel story-design <ws> [--force] [--direction TEXT] [--direction-file PATH]` | 生成核心玩法、长线主线、舞台路线图和角色成长线 |
+| `novel story-design-extend <ws> [--use-reference] [--direction TEXT] [--direction-file PATH]` | 保留已有内容，追加长线、角色线和后续舞台 |
 | `novel stage-insert <ws> [--direction TEXT] [--direction-file PATH] [--after-stage N] [--before-stage N]` | 基于灵感设计新舞台并插入舞台路线图 |
 | `novel mechanics-init <ws> [--file PATH] [--direction TEXT] [--none] [--force]` | 初始化或关闭可选机制层 |
 | `novel volume-outline <ws> [--volume N] [--force]`                    | 旧流程兼容：生成卷纲、每卷世界观和每卷舞台计划 |
@@ -335,8 +347,9 @@ novel write 我的新小说 --volume 1 --start 1 --max 3 --humanize-existing
 
 - `--txt <path>`：参考小说文件路径（仅 init）
 - `--batch-size N`：每次读取章节数，用于识别故事情节单元，默认 20（仅 init）
-- `--direction TEXT`：创作方向，如"改为现代都市背景"；`novel-outline` 用于生成全书方案，`story-design` 用于单独调整玩法/舞台/角色线
-- `--direction-file PATH`：从文件读取创作方向；适用于 `novel-outline` 和 `story-design`
+- `--direction TEXT`：创作方向，如"改为现代都市背景"；`novel-outline` 用于生成全书方案，`story-design` 用于单独调整玩法/舞台/角色线，`story-design-extend` 用于补充后续设计
+- `--direction-file PATH`：从文件读取创作方向；适用于 `novel-outline`、`story-design` 和 `story-design-extend`
+- `--use-reference`：`story-design-extend` 读取上次全书设计后新增的参考故事片段；不传时只基于已有新书设计续写
 - `--file PATH`：机制层设定文件路径，适用于 `mechanics-init`
 - `--none`：显式关闭机制层，适用于 `mechanics-init`
 - `--chapter-batch-size N`：章节资料每批章节数，默认 20；识别不到章节时才使用字符分片（仅 world-build）

@@ -1,0 +1,12 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <title>Chapter Matrix</title>
+  <defs>
+    <rect id="unit" width="13" height="13" rx="4"/>
+  </defs>
+  <g fill="currentColor">
+    <use href="#unit" x="20" y="20"/><use href="#unit" x="43.5" y="20"/><use href="#unit" x="67" y="20"/>
+    <use href="#unit" x="20" y="43.5"/><use href="#unit" x="67" y="43.5"/>
+    <use href="#unit" x="20" y="67"/><use href="#unit" x="43.5" y="67"/><use href="#unit" x="67" y="67"/>
+    <path d="M42 39c0-4 3-7 7-7h2c4 0 7 3 7 7v22c0 4-3 7-7 7h-2c-4 0-7-3-7-7V39Z" opacity=".72"/>
+  </g>
+</svg>

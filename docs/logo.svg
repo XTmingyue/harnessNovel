@@ -1,0 +1,10 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" style="color:#0b7769">
+  <title>HarnessNovel</title>
+  <defs>
+    <mask id="han-cut">
+      <rect width="100" height="100" fill="white"/>
+      <path d="m26 27 9 6M23 48l12 1M26 73l10-10M48 27h29C73 46 63 62 47 73M56 40c6 13 14 23 24 31" fill="none" stroke="black" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    </mask>
+  </defs>
+  <rect x="14" y="14" width="72" height="72" rx="18" fill="currentColor" mask="url(#han-cut)"/>
+</svg>

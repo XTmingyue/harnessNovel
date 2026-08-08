@@ -111,17 +111,20 @@ def _run_prompt(llm, folder, prompt_vars, output_path):
 def _load_manifest(ws):
     path = _manifest_path(ws)
     if not os.path.exists(path):
-        return {"version": 1, "sources": []}
+        return {"version": 1, "sources": [], "enabled": True}
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
-            return {"version": 1, "sources": []}
+            return {"version": 1, "sources": [], "enabled": True}
         data.setdefault("version", 1)
         data.setdefault("sources", [])
+        # enabled 默认 True（导入资料后即视为启用）；老 manifest 没有该字段时补上。
+        if "enabled" not in data:
+            data["enabled"] = True
         return data
     except Exception:
-        return {"version": 1, "sources": []}
+        return {"version": 1, "sources": [], "enabled": True}
 
 
 def _save_manifest(ws, manifest):
@@ -978,6 +981,10 @@ def build_world_knowledge(ws, llm, force=False, chunk_size=12000, merge_chunk_si
 # ── 公共入口：加载上下文 ──
 
 def load_world_knowledge_context(ws, max_chars=80000):
+    manifest = _load_manifest(ws)
+    # 用户可在 Web 界面关闭资料库；关闭后下游设计流程不再注入资料。
+    if manifest.get("enabled", True) is False:
+        return ""
     section_paths = _final_section_paths(ws)
     if section_paths:
         return _aggregate_sections(section_paths, max_chars=max_chars)
@@ -990,3 +997,16 @@ def load_world_knowledge_context(ws, max_chars=80000):
     if len(content) <= max_chars:
         return content
     return content[:max_chars] + "\n\n（目标世界知识库内容过长，以上为截断后的前置摘要。）"
+
+
+def set_world_knowledge_enabled(ws, enabled: bool) -> bool:
+    """切换资料库启用状态；持久化到 manifest。返回最终状态。"""
+    manifest = _load_manifest(ws)
+    manifest["enabled"] = bool(enabled)
+    _save_manifest(ws, manifest)
+    return bool(enabled)
+
+
+def is_world_knowledge_enabled(ws) -> bool:
+    """读取资料库启用状态。"""
+    return bool(_load_manifest(ws).get("enabled", True))

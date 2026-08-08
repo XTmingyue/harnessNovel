@@ -11,9 +11,6 @@
 【参考小说全书大纲】（只用于学习长线悬念推进方式，不可照搬剧情）
 {reference_outline}
 
-【参考小说世界观】（只用于理解参考长线依托的规则，不可照搬设定）
-{reference_worldview}
-
 【目标世界知识库】（可选）
 {world_knowledge}
 

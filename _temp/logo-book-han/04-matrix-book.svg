@@ -1,0 +1,11 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <title>Matrix Book</title>
+  <defs><rect id="p" width="10" height="10" rx="3" fill="currentColor"/></defs>
+  <g>
+    <use href="#p" x="18" y="25"/><use href="#p" x="18" y="45"/><use href="#p" x="18" y="65"/>
+    <use href="#p" x="36" y="25"/><use href="#p" x="36" y="45"/><use href="#p" x="36" y="65"/>
+    <use href="#p" x="54" y="25"/><use href="#p" x="63" y="45"/><use href="#p" x="72" y="65"/>
+    <use href="#p" x="72" y="25"/><use href="#p" x="72" y="45"/>
+  </g>
+  <path d="M13 19c15 0 27 4 37 12 10-8 22-12 37-12" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>harnessNovel · 响应式 Logo 案例</title>
+  <style>
+    :root{--paper:#f3f3ee;--surface:#fafbf8;--ink:#19372f;--green:#0b806d;--mint:#75cbb4;--muted:#718078;--line:#d4dbd5;--dark:#173a34}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Avenir Next","PingFang SC",sans-serif}
+    main{width:min(1180px,calc(100vw - 64px));margin:auto;padding:48px 0 60px}
+    header{display:flex;justify-content:space-between;align-items:end;margin-bottom:30px}h1{margin:0;font:600 39px "Iowan Old Style","Songti SC",serif}header p{width:520px;margin:0;color:var(--muted);font-size:14px;line-height:1.7}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}.card{padding:23px;border:1px solid var(--line);background:var(--surface)}.head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:18px}.head h2{margin:0;font-size:18px}.tag{color:var(--green);font:11px monospace;letter-spacing:.06em}
+    .show{display:grid;grid-template-columns:170px 1fr;height:190px;border:1px solid #dce3de}.mark{display:grid;place-items:center;background:#fff;color:var(--green)}.mark svg{width:112px;height:112px}.lockup{display:flex;align-items:center;gap:13px;padding:25px;background:var(--dark);color:#f2f7f4}.lockup svg{width:47px;height:47px;flex:0 0 auto}.word{font:500 24px Georgia,serif;letter-spacing:-.04em}.word strong{color:var(--mint);font-weight:900}.word span{font-weight:650}.sub{display:block;margin-top:5px;color:#a9bcb4;font-size:10px;letter-spacing:.04em}
+    .sizes{display:flex;align-items:end;gap:18px;height:60px;color:var(--green)}.sizes svg:nth-child(1){width:16px;height:16px}.sizes svg:nth-child(2){width:31px;height:31px}.sizes svg:nth-child(3){width:48px;height:48px}
+    .note{min-height:43px;margin:3px 0 0;color:var(--muted);font-size:13px;line-height:1.65}
+  </style>
+</head>
+<body><main>
+  <header><h1>汉 × 书 · 完整标志案例</h1><p>四个案例都让“汉”和书本共享笔画，而不是把汉字放入一个独立书框。右侧为 README/宣传场景，底部测试 favicon、侧栏和中尺寸图标。</p></header>
+  <section class="grid">
+    <article class="card">
+      <div class="head"><h2>A · 共用书脊</h2><span class="tag">推荐 · 融合最自然</span></div>
+      <div class="show">
+        <div class="mark">
+          <svg viewBox="0 0 100 100" fill="none">
+            <path d="M16 27c0-8 6-14 14-14h40c8 0 14 6 14 14v38" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+            <path d="m25 29 8 5m-10 15 11 1m-8 23 9-9M45 29h30C71 46 61 59 47 69m8-28c6 12 13 21 23 28" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M16 65c14 0 25 4 34 13 9-9 20-13 34-13v10c-14 0-25 3-34 11-9-8-20-11-34-11V65Z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="lockup">
+          <svg viewBox="0 0 100 100" fill="none"><path d="M16 27c0-8 6-14 14-14h40c8 0 14 6 14 14v38M25 29l8 5m-10 15 11 1m-8 23 9-9M45 29h30C71 46 61 59 47 69m8-28c6 12 13 21 23 28M16 65c14 0 25 4 34 13 9-9 20-13 34-13v10c-14 0-25 3-34 11-9-8-20-11-34-11V65Z" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div><div class="word"><strong>h</strong><strong>a</strong><span>rness</span><strong>N</strong><span>ovel</span></div><span class="sub">中文小说创作工作台</span></div>
+        </div>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 100 100" fill="none"><path d="M16 27c0-8 6-14 14-14h40c8 0 14 6 14 14v38M25 29l8 5m-10 15 11 1m-8 23 9-9M45 29h30C71 46 61 59 47 69m8-28c6 12 13 21 23 28M16 65c14 0 25 4 34 13 9-9 20-13 34-13v10c-14 0-25 3-34 11-9-8-20-11-34-11V65Z" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 100 100" fill="none"><path d="M16 27c0-8 6-14 14-14h40c8 0 14 6 14 14v38M25 29l8 5m-10 15 11 1m-8 23 9-9M45 29h30C71 46 61 59 47 69m8-28c6 12 13 21 23 28M16 65c14 0 25 4 34 13 9-9 20-13 34-13v10c-14 0-25 3-34 11-9-8-20-11-34-11V65Z" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 100 100" fill="none"><path d="M16 27c0-8 6-14 14-14h40c8 0 14 6 14 14v38M25 29l8 5m-10 15 11 1m-8 23 9-9M45 29h30C71 46 61 59 47 69m8-28c6 12 13 21 23 28M16 65c14 0 25 4 34 13 9-9 20-13 34-13v10c-14 0-25 3-34 11-9-8-20-11-34-11V65Z" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <p class="note">“汉”的收笔落入中央书脊，左右页从同一点展开。完整版本用于 README，小尺寸可退化为当前纯“汉”字骨。</p>
+    </article>
+
+    <article class="card">
+      <div class="head"><h2>B · 页脚承字</h2><span class="tag">最轻 · 编辑气质</span></div>
+      <div class="show">
+        <div class="mark">
+          <svg viewBox="0 0 100 100" fill="none">
+            <path d="m20 25 9 6m-12 18 13 1m-9 26 11-12M41 25h39C75 48 63 66 43 78m9-38c7 17 17 29 31 38" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M12 72c16 0 28 4 38 13 10-9 22-13 38-13" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="lockup">
+          <svg viewBox="0 0 100 100" fill="none"><path d="m20 25 9 6m-12 18 13 1m-9 26 11-12M41 25h39C75 48 63 66 43 78m9-38c7 17 17 29 31 38M12 72c16 0 28 4 38 13 10-9 22-13 38-13" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div><div class="word"><strong>h</strong><strong>a</strong><span>rness</span><strong>N</strong><span>ovel</span></div><span class="sub">中文小说创作工作台</span></div>
+        </div>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 100 100" fill="none"><path d="m20 25 9 6m-12 18 13 1m-9 26 11-12M41 25h39C75 48 63 66 43 78m9-38c7 17 17 29 31 38M12 72c16 0 28 4 38 13 10-9 22-13 38-13" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 100 100" fill="none"><path d="m20 25 9 6m-12 18 13 1m-9 26 11-12M41 25h39C75 48 63 66 43 78m9-38c7 17 17 29 31 38M12 72c16 0 28 4 38 13 10-9 22-13 38-13" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 100 100" fill="none"><path d="m20 25 9 6m-12 18 13 1m-9 26 11-12M41 25h39C75 48 63 66 43 78m9-38c7 17 17 29 31 38M12 72c16 0 28 4 38 13 10-9 22-13 38-13" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <p class="note">不画书框，只用底部两道页弧承接汉字。融合程度高、细节少，但作为独立应用图标的色块感较弱。</p>
+    </article>
+
+    <article class="card">
+      <div class="head"><h2>C · 负形书章</h2><span class="tag">头像识别最强</span></div>
+      <div class="show">
+        <div class="mark">
+          <svg viewBox="0 0 100 100">
+            <defs><mask id="cut-c"><rect width="100" height="100" fill="white"/><path d="m27 27 8 5m-10 16 11 1m-8 23 9-10M47 27h28C72 45 62 59 47 70m9-31c6 13 14 23 25 31M20 69c12 0 22 3 30 10 8-7 18-10 30-10" fill="none" stroke="black" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></mask></defs>
+            <rect x="12" y="12" width="76" height="76" rx="19" fill="currentColor" mask="url(#cut-c)"/>
+          </svg>
+        </div>
+        <div class="lockup">
+          <svg viewBox="0 0 100 100"><defs><mask id="cut-c2"><rect width="100" height="100" fill="white"/><path d="m27 27 8 5m-10 16 11 1m-8 23 9-10M47 27h28C72 45 62 59 47 70m9-31c6 13 14 23 25 31M20 69c12 0 22 3 30 10 8-7 18-10 30-10" fill="none" stroke="black" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></mask></defs><rect x="12" y="12" width="76" height="76" rx="19" fill="currentColor" mask="url(#cut-c2)"/></svg>
+          <div><div class="word"><strong>h</strong><strong>a</strong><span>rness</span><strong>N</strong><span>ovel</span></div><span class="sub">中文小说创作工作台</span></div>
+        </div>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 100 100"><rect x="12" y="12" width="76" height="76" rx="19" fill="currentColor"/></svg>
+        <svg viewBox="0 0 100 100"><rect x="12" y="12" width="76" height="76" rx="19" fill="currentColor"/></svg>
+        <svg viewBox="0 0 100 100"><rect x="12" y="12" width="76" height="76" rx="19" fill="currentColor"/></svg>
+      </div>
+      <p class="note">汉字与书页都作为负空间切入同一色块，适合头像和应用图标；小于 24px 时应切换为当前容器版简标。</p>
+    </article>
+
+    <article class="card">
+      <div class="head"><h2>D · 翻页印记</h2><span class="tag">文化感最强</span></div>
+      <div class="show">
+        <div class="mark">
+          <svg viewBox="0 0 100 100" fill="none">
+            <path d="M16 16h68v58L70 88H16V16Z" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
+            <path d="M70 88V74h14" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
+            <path d="m28 30 8 5m-10 15 11 1m-8 22 9-10M47 30h27C71 46 62 59 48 70m8-29c6 12 13 21 23 29" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="lockup">
+          <svg viewBox="0 0 100 100" fill="none"><path d="M16 16h68v58L70 88H16V16Zm54 72V74h14M28 30l8 5m-10 15 11 1m-8 22 9-10M47 30h27C71 46 62 59 48 70m8-29c6 12 13 21 23 29" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div><div class="word"><strong>h</strong><strong>a</strong><span>rness</span><strong>N</strong><span>ovel</span></div><span class="sub">中文小说创作工作台</span></div>
+        </div>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 100 100" fill="none"><path d="M16 16h68v58L70 88H16V16Zm54 72V74h14M28 30l8 5m-10 15 11 1m-8 22 9-10M47 30h27C71 46 62 59 48 70m8-29c6 12 13 21 23 29" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 100 100" fill="none"><path d="M16 16h68v58L70 88H16V16Zm54 72V74h14M28 30l8 5m-10 15 11 1m-8 22 9-10M47 30h27C71 46 62 59 48 70m8-29c6 12 13 21 23 29" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 100 100" fill="none"><path d="M16 16h68v58L70 88H16V16Zm54 72V74h14M28 30l8 5m-10 15 11 1m-8 22 9-10M47 30h27C71 46 62 59 48 70m8-29c6 12 13 21 23 29" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <p class="note">把容器理解为书页或印章，右下角翻页承担记忆点。更正式，但容易靠近出版社或阅读应用的气质。</p>
+    </article>
+  </section>
+</main></body></html>
