@@ -379,11 +379,13 @@ novel novel-outline 我的新小说 --direction "灵感输入"
 
 ## Star History
 
+## Star History
+
 <a href="https://www.star-history.com/?repos=XTmingyue%2FharnessNovel&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=XTmingyue/harnessNovel&type=date&theme=dark&legend=top-left&sealed_token=DEN19CRQZWfyo7qXaVjTSEv1q9uBKX8R6D8FlnHQ7lWY8b7SJye6UIaK42w9gBGtVKheN1sVDX2heuZY5xl-X8okpqU-Tv3ZA30nUTCEfOvs975XB42rHF7XiFu6lO4Hm4E8Z7jcQFXmh916dJ3YXC4OlkxP92rp3FTT6olO9Xsn62BOj_Qf8UnIs2z2" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=XTmingyue/harnessNovel&type=date&legend=top-left&sealed_token=DEN19CRQZWfyo7qXaVjTSEv1q9uBKX8R6D8FlnHQ7lWY8b7SJye6UIaK42w9gBGtVKheN1sVDX2heuZY5xl-X8okpqU-Tv3ZA30nUTCEfOvs975XB42rHF7XiFu6lO4Hm4E8Z7jcQFXmh916dJ3YXC4OlkxP92rp3FTT6olO9Xsn62BOj_Qf8UnIs2z2" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=XTmingyue/harnessNovel&type=date&legend=top-left&sealed_token=DEN19CRQZWfyo7qXaVjTSEv1q9uBKX8R6D8FlnHQ7lWY8b7SJye6UIaK42w9gBGtVKheN1sVDX2heuZY5xl-X8okpqU-Tv3ZA30nUTCEfOvs975XB42rHF7XiFu6lO4Hm4E8Z7jcQFXmh916dJ3YXC4OlkxP92rp3FTT6olO9Xsn62BOj_Qf8UnIs2z2" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=XTmingyue/harnessNovel&type=date&theme=dark&legend=top-left&sealed_token=pXVarvqjLwVGWU1ssO117sGXYJwt6q91Yf-QqTmDpDqz8roh31aOfNBVcB7ygXPCW6crcRbHychzuSUkX9fWEAg879re3tYB2rHmIF8MVG1GKrEF5HLS4w" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=XTmingyue/harnessNovel&type=date&legend=top-left&sealed_token=pXVarvqjLwVGWU1ssO117sGXYJwt6q91Yf-QqTmDpDqz8roh31aOfNBVcB7ygXPCW6crcRbHychzuSUkX9fWEAg879re3tYB2rHmIF8MVG1GKrEF5HLS4w" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=XTmingyue/harnessNovel&type=date&legend=top-left&sealed_token=pXVarvqjLwVGWU1ssO117sGXYJwt6q91Yf-QqTmDpDqz8roh31aOfNBVcB7ygXPCW6crcRbHychzuSUkX9fWEAg879re3tYB2rHmIF8MVG1GKrEF5HLS4w" />
  </picture>
 </a>
 
