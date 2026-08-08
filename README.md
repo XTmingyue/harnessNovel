@@ -63,7 +63,7 @@ pip install harnessNovel
 pip install --upgrade harnessNovel
 ```
 
-## Web 工作台
+<h2 align="left"><img src="docs/heading-web-zh.svg" alt="Web 工作台" height="32"></h2>
 
 项目提供本地可视化工作台。全书设计、舞台设计、故事情节、逐章章纲和正文生成均支持多轮对话，可对生成结果反复调整直到满意后再确认写入。
 

@@ -63,7 +63,7 @@ Update:
 pip install --upgrade harnessNovel
 ```
 
-## Local Web Workbench
+<h2 align="left"><img src="docs/heading-web-en.svg" alt="Local Web Workbench" height="32"></h2>
 
 The project provides a local visual workbench. Book design, stage design, story arcs, chapter outlines, and draft generation all support multi-round dialogue — you can iteratively adjust the results through conversation and confirm only when satisfied.
 
