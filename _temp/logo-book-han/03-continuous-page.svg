@@ -1,0 +1,5 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <title>Continuous Page</title>
+  <path d="M17 68V27c12 0 23 5 33 15 10-10 21-15 33-15v41c-13 0-24 4-33 12-9-8-20-12-33-12Z" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M29 35v25m0-13h13m0-12v25m7 0 8-25 8 25m-13-10h10M68 60V35l14 25V35" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

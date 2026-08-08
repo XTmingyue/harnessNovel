@@ -1,0 +1,7 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <title>Modern Han Glyph</title>
+  <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m18 24 10 6M15 48l13 1M18 76l11-11" stroke-width="7"/>
+    <path d="M43 24h39C77 48 64 67 43 79M53 41c7 17 17 29 31 38" stroke-width="7"/>
+  </g>
+</svg>

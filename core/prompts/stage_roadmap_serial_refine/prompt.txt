@@ -1,0 +1,56 @@
+你是长篇网文舞台与分卷结构设计师。请根据用户指令，只重新生成舞台{stage_number}，并承接前一个舞台的最新版本。
+
+【用户本轮指令】
+{instruction}
+
+【全书长线主线】
+{long_mainline}
+
+【当前阶段粗纲】
+{current_stage_outline}
+
+【对应参考卷纲：参考卷{reference_volume_number}《{reference_volume_title}》】
+{reference_volume_outline}
+
+【对应参考卷章节规模】
+参考卷{reference_volume_number}共约 {reference_chapter_count} 章。
+
+【前一个舞台的最新版本】
+{previous_stage}
+
+【当前舞台原版本】
+{current_stage}
+
+请只输出 JSON，不要输出解释、Markdown 代码块或 JSON 外文本：
+{{
+  "stage_roadmap_md": "# 舞台{stage_number}：舞台名称\n\n预计章节数：{reference_chapter_count}章\n\n# 一、卷纲概览\n..."
+}}
+
+输出结构必须与参考小说卷纲一致：
+
+# 舞台{stage_number}：舞台名称
+预计章节数：{reference_chapter_count}章
+
+# 一、卷纲概览
+写清本舞台核心矛盾、主角目标、提升项及对长线主线的推进。
+
+# 二、三幕结构
+写出开头、发展、高潮与收尾。每幕给出相对章节区间，从第1章连续覆盖至第{reference_chapter_count}章，不得重叠或断档。
+
+# 三、人物谱系
+写清主角、核心配角、反派和功能性角色的身份、关系、行动及变化。
+
+# 四、伏笔追踪
+分别写本舞台埋下、回收和跨舞台延续的伏笔。
+
+# 五、核心爽点
+列出2至3个核心高潮，写清压抑铺垫、爆发机制、释放和收获。
+
+硬性要求：
+1. 只输出舞台{stage_number}，不得输出其他舞台或完整舞台路线图。
+2. 落实用户指令。即使指令不直接点名本舞台，也要根据前序最新状态修正人物、资源、关系、因果和伏笔承接。
+3. 当前舞台原版本存在时，以其为修改底稿并保留不受影响的内容；若标记为完全重新生成，则不得参考旧内容。
+4. 上一舞台是连续性事实来源，不得重置其已经形成的状态与结果。
+5. 参考卷纲只学习结构密度和推进方式，不得照搬人名、地名、势力、能力、事件或独特因果。
+6. 预计章节数必须直接对标参考卷{reference_volume_number}，写为 {reference_chapter_count} 章。
+7. 当前是全书第{stage_number}/{total_stages}个舞台。除最后舞台外留下自然钩子；最后舞台完成长线核心矛盾。

@@ -1,0 +1,5 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <title>Bound Letterform</title>
+  <path d="M20 22v56M20 50h20M40 22v56m0 0 13-56 14 56M47 55h13M67 78V22l17 56V22" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M13 16c14 0 26 3 37 10 11-7 23-10 37-10M13 84c14 0 26 3 37 10 11-7 23-10 37-10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+</svg>

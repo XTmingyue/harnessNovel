@@ -408,7 +408,6 @@
             <span class="pill input">参考小说.txt</span>
             <span class="pill output">reference/outlines</span>
             <span class="pill output">reference/chapters</span>
-            <span class="pill output">reference_worldview.md</span>
           </div>
         </article>
         <article class="flow-node">
@@ -503,7 +502,7 @@
         <summary>
           <span class="summary-title">
             <strong><code>novel init 大罗 --txt 参考小说.txt</code></strong>
-            <span>建立项目，拆解参考小说，提炼参考书结构和世界观</span>
+            <span>建立项目，拆解参考小说，提炼全书大纲、卷纲和故事片段</span>
           </span>
           <span class="chevron">›</span>
         </summary>
@@ -521,9 +520,8 @@
               <li>创建 <code>my-novels/大罗</code>、<code>reference</code>、<code>file_system</code></li>
               <li>复制参考小说到 <code>reference/sample_novel.txt</code></li>
               <li>拆分章节到 <code>reference/chapters</code></li>
-              <li>提炼参考批次摘要和参考卷纲到 <code>reference/outlines</code></li>
+              <li>提炼参考故事片段和参考卷纲到 <code>reference/outlines</code></li>
               <li>如果只有单卷，尝试智能重分卷</li>
-              <li>根据参考卷纲提炼参考世界观</li>
             </ul>
           </div>
           <div class="branch">
@@ -532,17 +530,15 @@
               <li><code>reference/sample_novel.txt</code></li>
               <li><code>reference/chapters/vol_xx_xxx/chapter_001.md</code></li>
               <li><code>reference/chapters/_volumes.json</code></li>
-              <li><code>reference/outlines/vol_xx_xxx/batch_001_020.md</code></li>
-              <li><code>file_system/worldviews/vol_xx_worldview.md</code></li>
-              <li><code>file_system/reference_worldview.md</code></li>
+              <li><code>reference/outlines/novel_outline.md</code></li>
+              <li><code>reference/outlines/vol_xx_xxx/volume_outline.md</code></li>
+              <li><code>reference/outlines/vol_xx_xxx/story_arcs/arc_xxx.md</code></li>
             </ul>
           </div>
           <div class="branch">
             <div class="branch-label mid">下游</div>
             <ul>
-              <li><code>reference/outlines</code> 供新书大纲、分卷大纲、批次摘要使用</li>
-              <li><code>reference/chapters</code> 供正文生成阶段参考节奏</li>
-              <li><code>reference_worldview.md</code> 供新书世界观和映射表生成使用</li>
+              <li><code>reference/outlines</code> 供新书全书设计、舞台设计和故事情节生成使用</li>
             </ul>
           </div>
         </div>
@@ -665,7 +661,6 @@
             <ul>
               <li><code>--direction</code>、<code>--direction-file</code> 或 <code>creative_direction.md</code></li>
               <li><code>reference/outlines</code></li>
-              <li><code>file_system/reference_worldview.md</code></li>
               <li><code>file_system/world_knowledge/worlds/_final/*.md</code>，如果存在</li>
             </ul>
           </div>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>HarnessNovel — Logo Design Exploration</title>
+  <style>
+    :root{--paper:#f4f3ee;--ink:#19362f;--muted:#748079;--green:#0d806d;--dark:#173a34;--line:#d8ddd8}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Avenir Next","PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
+    main{width:min(1180px,calc(100vw - 64px));margin:auto;padding:54px 0 72px}
+    header{display:flex;justify-content:space-between;align-items:end;margin-bottom:42px}h1{margin:0;font:600 42px/1.1 "Iowan Old Style","Songti SC",serif}header p{width:480px;margin:0;color:var(--muted);font-size:14px;line-height:1.75}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.card{border-top:1px solid var(--ink);padding-top:18px;transition:transform .35s ease}.card:hover{transform:translateY(-4px)}
+    .meta{display:flex;justify-content:space-between;align-items:baseline}.num{font:12px/1 monospace;color:var(--green)}h2{margin:0;font-size:17px;font-weight:650}
+    .canvas{height:235px;margin:18px 0;background:#fafbf8;display:grid;place-items:center}.canvas img{width:112px;height:112px;filter:brightness(0) saturate(100%) invert(37%) sepia(45%) saturate(1120%) hue-rotate(120deg) brightness(91%) contrast(94%);transition:transform .45s cubic-bezier(.16,1,.3,1)}.card:hover .canvas img{transform:scale(1.07)}
+    .dark{height:68px;display:flex;align-items:center;gap:12px;padding:0 17px;background:var(--dark);color:#f1f7f4}.dark img{width:31px;height:31px;filter:brightness(0) invert(1)}.wordmark{font:700 18px/1 "Iowan Old Style",Georgia,serif}.subtitle{display:block;margin-top:4px;color:#aec0ba;font-size:10px}
+    .desc{min-height:66px;margin:16px 0 0;color:var(--muted);font-size:12.5px;line-height:1.65}
+    footer{display:flex;justify-content:space-between;margin-top:40px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}
+    @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}header{display:block}header p{width:auto;margin-top:14px}}@media(max-width:620px){main{width:calc(100% - 32px)}.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body><main>
+  <header><h1>harnessNovel</h1><p>第三轮依据 Logo Generator 的极简原则完成：1–2 个核心元素、充足负空间、单色 SVG，以及 31px 导航栏实景检验。HAN/汉只保留为隐含设计逻辑。</p></header>
+  <section class="grid">
+    <article class="card"><div class="meta"><span class="num">01 / PURE GEOMETRY</span><h2>束页</h2></div><div class="canvas"><img src="01-bound-pages.svg"></div><div class="dark"><img src="01-bound-pages.svg"><div><span class="wordmark">harnessNovel</span><span class="subtitle">中文小说创作工作台</span></div></div><p class="desc">展开的书被一条水平结构组织起来。只保留 harness 与 Novel 两个核心含义，中央书脊隐约形成 H。</p></article>
+    <article class="card"><div class="meta"><span class="num">02 / SYMBOL ABSTRACTION · V2</span><h2>汉部</h2></div><div class="canvas"><img src="02-han-radical.svg"></div><div class="dark"><img src="02-han-radical.svg"><div><span class="wordmark">harnessNovel</span><span class="subtitle">中文小说创作工作台</span></div></div><p class="desc">基于统一网格重绘“三点水”与“又”的骨架。笔画、圆角和间距完全统一，保留汉字识别度，同时避免直接使用字体字形。</p></article>
+    <article class="card"><div class="meta"><span class="num">03 / LINE SYSTEM</span><h2>文流</h2></div><div class="canvas"><img src="03-story-weave.svg"></div><div class="dark"><img src="03-story-weave.svg"><div><span class="wordmark">harnessNovel</span><span class="subtitle">中文小说创作工作台</span></div></div><p class="desc">四条叙事线从同一源头展开、交汇并收束。表达多轮生成和故事线编织，不使用书本或笔尖。</p></article>
+    <article class="card"><div class="meta"><span class="num">04 / DOT MATRIX</span><h2>章节矩阵</h2></div><div class="canvas"><img src="04-chapter-matrix.svg"></div><div class="dark"><img src="04-chapter-matrix.svg"><div><span class="wordmark">harnessNovel</span><span class="subtitle">中文小说创作工作台</span></div></div><p class="desc">离散章节单元围绕中央主线排列。缺失的中心空间让图形保持呼吸，也暗示内容仍在生成。</p></article>
+    <article class="card"><div class="meta"><span class="num">05 / LINES + GEOMETRY</span><h2>折稿</h2></div><div class="canvas"><img src="05-folded-manuscript.svg"></div><div class="dark"><img src="05-folded-manuscript.svg"><div><span class="wordmark">harnessNovel</span><span class="subtitle">中文小说创作工作台</span></div></div><p class="desc">稿纸、折页和贯穿式束带构成稳定图形。更偏写作生产工具，适合产品界面和桌面应用图标。</p></article>
+    <article class="card"><div class="meta"><span class="num">06 / NODE NETWORK</span><h2>叙事节点</h2></div><div class="canvas"><img src="06-narrative-nodes.svg"></div><div class="dark"><img src="06-narrative-nodes.svg"><div><span class="wordmark">harnessNovel</span><span class="subtitle">中文小说创作工作台</span></div></div><p class="desc">素材、情节和章节汇入核心，再展开为不同成品。非对称节点让工具属性更明显。</p></article>
+  </section>
+  <footer><span>Logo Generator assisted exploration</span><span>Monochrome · currentColor · SVG 100×100</span></footer>
+</main></body></html>

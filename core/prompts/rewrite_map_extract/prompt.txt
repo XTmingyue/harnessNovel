@@ -5,9 +5,6 @@
 【参考小说大纲】
 {reference_outline}
 
-【参考小说世界观】
-{reference_worldview}
-
 【新小说大纲】
 {novel_outline}
 

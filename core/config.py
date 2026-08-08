@@ -5,10 +5,10 @@ _GLOBAL_ENV_PATH = os.path.join(_GLOBAL_CONFIG_DIR, ".env")
 
 
 def _load_env():
-    """按优先级查找 .env：当前目录 → ~/.harnessNovel/.env"""
+    """按优先级查找 .env：~/.harnessNovel/.env → 当前目录兼容回退。"""
     for env_path in [
-        os.path.join(os.getcwd(), ".env"),
         _GLOBAL_ENV_PATH,
+        os.path.join(os.getcwd(), ".env"),
     ]:
         env = {}
         if not os.path.exists(env_path):
@@ -27,6 +27,18 @@ def _load_env():
 
 class ConfigLoader:
     _env = None
+
+    @classmethod
+    def reload(cls):
+        """清除进程内 .env 缓存，使 Web 端保存的新配置可被下一次调用读取。"""
+        cls._env = None
+
+    @classmethod
+    def activate(cls, updates):
+        """应用运行时配置，使当前进程及后续子进程立即使用新值。"""
+        for key, value in updates.items():
+            os.environ[str(key)] = str(value)
+        cls.reload()
 
     @classmethod
     def _get_env(cls):
@@ -51,10 +63,10 @@ class ConfigLoader:
 
     @classmethod
     def get_adaptive_builder_config(cls):
-        """仿写核心任务的模型配置（pro 模型）。"""
+        """全书设计与舞台设计配置（推荐 pro 模型）。"""
         return cls._build_config("ADAPTIVE_BUILDER")
 
     @classmethod
     def get_adaptive_builder_lite_config(cls):
-        """仿写辅助任务的模型配置（flash 模型）。"""
+        """故事情节、章纲、正文及轻量辅助任务配置（推荐 flash 模型）。"""
         return cls._build_config("ADAPTIVE_BUILDER_LITE")

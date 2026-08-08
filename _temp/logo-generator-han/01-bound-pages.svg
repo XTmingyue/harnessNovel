@@ -1,0 +1,8 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <title>Bound Pages</title>
+  <g fill="currentColor">
+    <path d="M18 22c13 0 23 4 32 12v45c-9-8-19-12-32-12V22Z"/>
+    <path d="M82 18c-13 1-23 6-32 16v45c9-8 19-12 32-12V18Z" opacity=".72"/>
+  </g>
+  <path d="M14 49h72" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+</svg>

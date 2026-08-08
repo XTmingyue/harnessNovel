@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>HarnessNovel Symbol Concepts</title>
+  <style>
+    :root{--paper:#f2f3ee;--card:#fafbf8;--ink:#17352e;--muted:#6e7c76;--green:#0b806c;--rail:#173b34;--line:#d5ded8}
+    *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font-family:"Avenir Next","PingFang SC",sans-serif}
+    main{width:min(1180px,calc(100vw - 64px));margin:auto;padding:48px 0 60px}
+    header{display:flex;align-items:end;justify-content:space-between;margin-bottom:28px}
+    h1{margin:0;font:600 38px/1.2 "Iowan Old Style","Songti SC",serif}
+    header p{width:500px;margin:0;color:var(--muted);font-size:14px;line-height:1.7}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}.card{padding:24px;border:1px solid var(--line);background:var(--card)}
+    .head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:20px}.head h2{margin:0;font-size:19px}.tag{color:var(--green);font-size:12px;letter-spacing:.08em}
+    .stage{display:grid;grid-template-columns:168px 1fr;min-height:178px;border:1px solid #dce3de}.hero{display:grid;place-items:center;background:#fff}.rail{display:flex;align-items:center;gap:13px;padding:24px;background:var(--rail);color:#f2f7f4}
+    .large{width:92px;height:92px;color:var(--green)}.small{width:34px;height:34px;flex:0 0 auto}
+    .brand{font:700 21px/1.1 "Iowan Old Style",Georgia,serif}.sub{display:block;margin-top:5px;color:#abc0b8;font-size:11px}
+    .sizes{display:flex;align-items:end;gap:20px;height:58px;color:var(--green)}.sizes svg:nth-child(1){width:18px;height:18px}.sizes svg:nth-child(2){width:28px;height:28px}.sizes svg:nth-child(3){width:44px;height:44px}
+    .note{min-height:42px;margin:2px 0 0;color:var(--muted);font-size:13px;line-height:1.65}
+    @media(max-width:800px){main{width:min(100% - 32px,600px)}header{display:block}header p{width:auto;margin-top:12px}.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body><main>
+  <header><h1>HAN · 从字母变成符号</h1><p>HAN 不再直接展示，而是作为图形的隐藏骨架。每个方案第一眼都是一个完整标志，品牌释义留到第二眼才被发现。</p></header>
+  <section class="grid">
+    <article class="card">
+      <div class="head"><h2>A · 汉字水墨</h2><span class="tag">中文身份</span></div>
+      <div class="stage">
+        <div class="hero">
+          <svg class="large" viewBox="0 0 80 80" fill="none">
+            <path d="M13 18 20 23M10 36l9 2M14 58l7-7" stroke="currentColor" stroke-width="7" stroke-linecap="round"/>
+            <path d="M31 16h34L55 37 69 63H57L47 46 36 64H23l17-28-9-20Z" fill="currentColor"/>
+            <path d="M34 21 47 36 59 21" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="rail">
+          <svg class="small" viewBox="0 0 80 80" fill="none"><path d="M13 18 20 23M10 36l9 2M14 58l7-7" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><path d="M31 16h34L55 37 69 63H57L47 46 36 64H23l17-28-9-20Z" fill="currentColor"/></svg>
+          <div><span class="brand">harnessNovel</span><span class="sub">中文小说创作工作台</span></div>
+        </div>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 80 80"><path d="m13 18 7 5m-10 13 9 2m-5 20 7-7" stroke="currentColor" stroke-width="8" stroke-linecap="round"/><path d="M31 16h34L55 37 69 63H57L47 46 36 64H23l17-28-9-20Z" fill="currentColor"/></svg>
+        <svg viewBox="0 0 80 80"><path d="m13 18 7 5m-10 13 9 2m-5 20 7-7" stroke="currentColor" stroke-width="8" stroke-linecap="round"/><path d="M31 16h34L55 37 69 63H57L47 46 36 64H23l17-28-9-20Z" fill="currentColor"/></svg>
+        <svg viewBox="0 0 80 80"><path d="m13 18 7 5m-10 13 9 2m-5 20 7-7" stroke="currentColor" stroke-width="8" stroke-linecap="round"/><path d="M31 16h34L55 37 69 63H57L47 46 36 64H23l17-28-9-20Z" fill="currentColor"/></svg>
+      </div>
+      <p class="note">从“汉”的三点水与“又”提炼，不直接写 HAN。识别为中文品牌，同时右侧折线像翻页和情节转折。</p>
+    </article>
+
+    <article class="card">
+      <div class="head"><h2>B · 束页</h2><span class="tag">推荐 · 品牌含义</span></div>
+      <div class="stage">
+        <div class="hero">
+          <svg class="large" viewBox="0 0 80 80" fill="none">
+            <path d="M16 15c10 1 18 5 24 12v39c-7-7-15-10-24-11V15Z" fill="currentColor"/>
+            <path d="M64 15c-10 1-18 5-24 12v39c7-7 15-10 24-11V15Z" fill="currentColor" opacity=".72"/>
+            <path d="M11 35h58" stroke="#f3f4ef" stroke-width="7" stroke-linecap="round"/>
+            <path d="m35 31 5 4 5-4v12l-5-4-5 4V31Z" fill="currentColor" stroke="#f3f4ef" stroke-width="3" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="rail">
+          <svg class="small" viewBox="0 0 80 80" fill="none"><path d="M16 15c10 1 18 5 24 12v39c-7-7-15-10-24-11V15Zm48 0c-10 1-18 5-24 12v39c7-7 15-10 24-11V15Z" fill="currentColor"/><path d="M11 35h58" stroke="#173b34" stroke-width="7" stroke-linecap="round"/></svg>
+          <div><span class="brand">harnessNovel</span><span class="sub">中文小说创作工作台</span></div>
+        </div>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 80 80"><path d="M16 15c10 1 18 5 24 12v39c-7-7-15-10-24-11V15Zm48 0c-10 1-18 5-24 12v39c7-7 15-10 24-11V15Z" fill="currentColor"/><path d="M11 35h58" stroke="#f3f4ef" stroke-width="8"/></svg>
+        <svg viewBox="0 0 80 80"><path d="M16 15c10 1 18 5 24 12v39c-7-7-15-10-24-11V15Zm48 0c-10 1-18 5-24 12v39c7-7 15-10 24-11V15Z" fill="currentColor"/><path d="M11 35h58" stroke="#f3f4ef" stroke-width="8"/></svg>
+        <svg viewBox="0 0 80 80"><path d="M16 15c10 1 18 5 24 12v39c-7-7-15-10-24-11V15Zm48 0c-10 1-18 5-24 12v39c7-7 15-10 24-11V15Z" fill="currentColor"/><path d="M11 35h58" stroke="#f3f4ef" stroke-width="8"/></svg>
+      </div>
+      <p class="note">一本被“harness”约束和组织起来的书：横向束带代表流程，展开书页代表 Novel。HAN 只存在于结构比例中。</p>
+    </article>
+
+    <article class="card">
+      <div class="head"><h2>C · 情节编织</h2><span class="tag">生成流程</span></div>
+      <div class="stage">
+        <div class="hero">
+          <svg class="large" viewBox="0 0 80 80" fill="none">
+            <path d="M15 57V23c0-6 5-11 11-11s11 5 11 11v34c0 6 5 11 11 11s11-5 11-11V23" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>
+            <path d="m23 39 17-17 17 17" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="15" cy="57" r="5" fill="currentColor"/><circle cx="59" cy="23" r="5" fill="currentColor"/>
+          </svg>
+        </div>
+        <div class="rail">
+          <svg class="small" viewBox="0 0 80 80" fill="none"><path d="M15 57V23c0-6 5-11 11-11s11 5 11 11v34c0 6 5 11 11 11s11-5 11-11V23M23 39l17-17 17 17" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div><span class="brand">harnessNovel</span><span class="sub">中文小说创作工作台</span></div>
+        </div>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 80 80" fill="none"><path d="M15 57V23c0-6 5-11 11-11s11 5 11 11v34c0 6 5 11 11 11s11-5 11-11V23M23 39l17-17 17 17" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 80 80" fill="none"><path d="M15 57V23c0-6 5-11 11-11s11 5 11 11v34c0 6 5 11 11 11s11-5 11-11V23M23 39l17-17 17 17" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 80 80" fill="none"><path d="M15 57V23c0-6 5-11 11-11s11 5 11 11v34c0 6 5 11 11 11s11-5 11-11V23M23 39l17-17 17 17" stroke="currentColor" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <p class="note">一条连续线编织出起伏、交汇与转折，代表从拆书到正文的创作链。H、A、N 被藏在线路的节点关系里。</p>
+    </article>
+
+    <article class="card">
+      <div class="head"><h2>D · 文脉</h2><span class="tag">克制 · 编辑感</span></div>
+      <div class="stage">
+        <div class="hero">
+          <svg class="large" viewBox="0 0 80 80" fill="none">
+            <path d="M16 17v46M16 28c11 0 18-4 24-12v48M40 27c8 0 15-3 24-11M40 42c8 0 15 3 24 12" stroke="currentColor" stroke-width="7" stroke-linecap="round"/>
+            <path d="m57 47 7 7-8 5" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="rail">
+          <svg class="small" viewBox="0 0 80 80" fill="none"><path d="M16 17v46M16 28c11 0 18-4 24-12v48M40 27c8 0 15-3 24-11M40 42c8 0 15 3 24 12m-7-7 7 7-8 5" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div><span class="brand">harnessNovel</span><span class="sub">中文小说创作工作台</span></div>
+        </div>
+      </div>
+      <div class="sizes">
+        <svg viewBox="0 0 80 80" fill="none"><path d="M16 17v46M16 28c11 0 18-4 24-12v48M40 27c8 0 15-3 24-11M40 42c8 0 15 3 24 12m-7-7 7 7-8 5" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 80 80" fill="none"><path d="M16 17v46M16 28c11 0 18-4 24-12v48M40 27c8 0 15-3 24-11M40 42c8 0 15 3 24 12m-7-7 7 7-8 5" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg viewBox="0 0 80 80" fill="none"><path d="M16 17v46M16 28c11 0 18-4 24-12v48M40 27c8 0 15-3 24-11M40 42c8 0 15 3 24 12m-7-7 7 7-8 5" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <p class="note">抽象为“主线—分支—收束”的叙事脉络，不依赖书本和笔尖等常见符号，更像专业创作工具。</p>
+    </article>
+  </section>
+</main></body></html>
