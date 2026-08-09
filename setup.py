@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="harnessNovel",
-    version="2.0.0",
+    version="2.0.1",
     author="飞鸟 one the way",
     description="长篇网络小说写作 AI Agent",
     long_description=open("README.md", encoding="utf-8").read(),
