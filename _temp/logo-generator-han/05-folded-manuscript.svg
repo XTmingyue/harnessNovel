@@ -1,7 +1,0 @@
-<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <title>Folded Manuscript</title>
-  <path d="M23 20h38l16 16v44H23V20Z" fill="currentColor"/>
-  <path d="M61 20v17h16" fill="none" stroke="white" stroke-width="4" stroke-linejoin="round"/>
-  <path d="M35 48h30M35 58h22M35 68h27" fill="none" stroke="white" stroke-width="4" stroke-linecap="round"/>
-  <path d="M20 46h60" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
-</svg>

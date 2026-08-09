@@ -1,5 +1,0 @@
-<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <title>Page Cut</title>
-  <path d="M16 20c13 0 25 5 34 14 9-9 21-14 34-14v54c-14 0-25 4-34 12-9-8-20-12-34-12V20Z" fill="currentColor"/>
-  <path d="M27 32v29m0-15h15m0-14v29M49 61l9-29 10 29M53 51h11M70 61V32l13 29V32" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>

@@ -1,9 +1,0 @@
-<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <title>Negative Spine</title>
-  <g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M17 24c13 0 24 5 33 15v40c-9-8-20-12-33-12V24Z"/>
-    <path d="M83 20c-13 1-24 7-33 19v40c9-8 20-12 33-12V20Z"/>
-    <path d="M28 34v25m0-13h16m0-12v25"/>
-    <path d="m56 59 8-25 9 25M59 49h11"/>
-  </g>
-</svg>

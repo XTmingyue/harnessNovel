@@ -8,3 +8,4 @@ dist/
 build/
 tests/
 .pytest_cache/
+_temp/

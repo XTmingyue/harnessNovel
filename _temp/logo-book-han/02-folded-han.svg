@@ -1,8 +1,0 @@
-<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-  <title>Folded HAN</title>
-  <g fill="currentColor">
-    <path d="M18 22h18v22h14V31L64 20v24h18v34H64V56L50 67V56H36v22H18V22Z"/>
-    <path d="m50 31 14-11v24L50 55V31Z" opacity=".66"/>
-  </g>
-  <path d="m36 44 14-13 14 13M36 56l28-12" fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
