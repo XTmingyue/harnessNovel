@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from core.prompt_loader import PromptLoader
@@ -43,6 +44,12 @@ WORLD_SECTIONS = [
 ]
 
 SECTION_LOOKUP = dict(WORLD_SECTIONS)
+WORLD_SECTION_NAMES = tuple(name for name, _ in WORLD_SECTIONS)
+CANON_INDEX_SECTIONS = (
+    "公共人物", "公共势力", "公共地点", "公共事件与历史线",
+    "公共物品与法宝", "公共技能与法术", "力量体系关键词",
+    "世界观规则关键词", "待补充类别",
+)
 
 
 # ── 路径工具 ──
@@ -94,7 +101,20 @@ def _write_file(path, content):
         f.write(content.rstrip() + "\n")
 
 
-def _run_prompt(llm, folder, prompt_vars, output_path):
+def _require_headings(content, headings, label):
+    missing = [
+        heading for heading in headings
+        if not re.search(rf"(?m)^#\s*{re.escape(heading)}\s*$", content or "")
+    ]
+    if missing:
+        raise RuntimeError(f"{label}缺少必要栏目：{'、'.join(missing)}。本轮结果未写入，请重试。")
+
+
+def _has_meaningful_file(path):
+    return bool(os.path.exists(path) and _read_file(path).strip())
+
+
+def _run_prompt(llm, folder, prompt_vars, output_path, required_headings=None):
     """加载 prompt → llm.generate → normalize_text → _write_file，返回 normalize 后内容。
 
     纯生成+落盘。不含 print、不含 mtime 跳过、不读回文件。
@@ -102,6 +122,10 @@ def _run_prompt(llm, folder, prompt_vars, output_path):
     """
     prompt = PromptLoader.load(folder, **prompt_vars)
     content = normalize_text(llm.generate(prompt))
+    if not content:
+        raise RuntimeError(f"{folder} 未返回有效内容，本轮结果未写入，请检查模型配置或重试。")
+    if required_headings:
+        _require_headings(content, required_headings, folder)
     _write_file(output_path, content)
     return content
 
@@ -327,16 +351,33 @@ def _split_source_slices(text, chapter_batch_size, fallback_chunk_size):
     chapters = _find_chapters(text)
     if len(chapters) >= 2:
         slices = []
-        for start in range(0, len(chapters), chapter_batch_size):
-            end = min(start + chapter_batch_size, len(chapters))
-            batch = chapters[start:end]
-            label = f"第{start + 1}-{end}章"
+        batch = []
+        batch_chars = 0
+        batch_start = 1
+
+        def flush_batch(end_index):
+            nonlocal batch, batch_chars
+            if not batch:
+                return
             slices.append({
-                "label": label,
+                "label": f"第{batch_start}-{end_index}章",
                 "kind": "chapter_batch",
                 "text": "\n\n".join(ch["content"] for ch in batch),
                 "chapter_count": len(batch),
             })
+            batch = []
+            batch_chars = 0
+
+        for chapter_index, chapter in enumerate(chapters, start=1):
+            chapter_chars = len(chapter["content"])
+            over_count = len(batch) >= chapter_batch_size
+            over_chars = bool(batch) and batch_chars + chapter_chars + 2 > fallback_chunk_size
+            if over_count or over_chars:
+                flush_batch(chapter_index - 1)
+                batch_start = chapter_index
+            batch.append(chapter)
+            batch_chars += chapter_chars + (2 if len(batch) > 1 else 0)
+        flush_batch(len(chapters))
         return slices
 
     chunks = _split_text(text, fallback_chunk_size)
@@ -490,11 +531,27 @@ def _split_sections_from_document(content):
     return sections
 
 
+def _compact_world_document(content, max_chars=45000):
+    """按栏目均衡压缩阶段摘要，避免串行汇总时单次上下文持续膨胀。"""
+    content = normalize_text(content or "")
+    if len(content) <= max_chars:
+        return content
+    sections = _split_sections_from_document(content)
+    section_budget = max(1200, max_chars // len(WORLD_SECTIONS) - 80)
+    parts = []
+    for section_name, _ in WORLD_SECTIONS:
+        block = sections.get(section_name, f"# {section_name}\n\n无")
+        if len(block) > section_budget:
+            block = block[:section_budget].rstrip() + "\n\n（本栏目阶段摘要过长，已均衡截断。）"
+        parts.append(block)
+    return "\n\n---\n\n".join(parts)
+
+
 def _final_section_paths(ws):
     return [
         (section_name, _final_section_path(ws, section_name))
         for section_name, _ in WORLD_SECTIONS
-        if os.path.exists(_final_section_path(ws, section_name))
+        if _has_meaningful_file(_final_section_path(ws, section_name))
     ]
 
 
@@ -529,22 +586,45 @@ def _source_slices(record, chunk_size, chapter_batch_size):
 
 # ── Cards 与基准索引 ──
 
-def _build_record_cards(ws, record, slices, llm, force=False, canon_index="", dependency_mtime=None):
+def _resolved_workers(max_workers, task_count):
+    try:
+        requested = int(max_workers or 4)
+    except (TypeError, ValueError):
+        requested = 4
+    return max(1, min(requested, max(1, task_count)))
+
+
+def _build_record_cards(ws, record, slices, llm, force=False, canon_index="",
+                        dependency_mtime=None, max_workers=4):
     source_mtime = record.get("mtime") or os.path.getmtime(record["imported_path"])
     source_card_paths = []
+    pending = []
     for idx, source_slice in enumerate(slices, start=1):
         card_path = os.path.join(_cards_dir(ws), f"{record['id']}_part_{idx:03d}.md")
         source_card_paths.append(card_path)
         card_is_fresh = (
-            os.path.exists(card_path)
+            _has_meaningful_file(card_path)
             and os.path.getmtime(card_path) >= source_mtime
             and (not dependency_mtime or os.path.getmtime(card_path) >= dependency_mtime)
         )
         if card_is_fresh and not force:
             continue
 
+        pending.append((idx, source_slice, card_path))
+
+    if not pending:
+        return source_card_paths
+
+    workers = _resolved_workers(max_workers, len(pending))
+    print(
+        f"  并行结构化{record['role_label']}《{record['file_name']}》："
+        f"共 {len(pending)} 个章节批次，并发 {workers}"
+    )
+
+    def extract_card(job):
+        idx, source_slice, card_path = job
         print(
-            f"  结构化{record['role_label']}：{record['file_name']} "
+            f"  开始结构化{record['role_label']}：{record['file_name']} "
             f"{source_slice['label']}（{idx}/{len(slices)}）"
         )
         _run_prompt(
@@ -561,12 +641,27 @@ def _build_record_cards(ws, record, slices, llm, force=False, canon_index="", de
                 source_text=source_slice["text"],
             ),
             card_path,
+            required_headings=WORLD_SECTION_NAMES,
         )
+        return idx, source_slice["label"]
+
+    completed = 0
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="world-card") as executor:
+        futures = [executor.submit(extract_card, job) for job in pending]
+        try:
+            for future in as_completed(futures):
+                idx, label = future.result()
+                completed += 1
+                print(f"  完成资料卡 {completed}/{len(pending)}：{label}（原批次 {idx}）")
+        except Exception:
+            for future in futures:
+                future.cancel()
+            raise
     return source_card_paths
 
 
 def _build_canon_index(ws, primary_record, primary_card_paths, llm, force=False):
-    existing_cards = [path for path in primary_card_paths if os.path.exists(path)]
+    existing_cards = [path for path in primary_card_paths if _has_meaningful_file(path)]
     if not existing_cards:
         return ""
 
@@ -579,20 +674,32 @@ def _build_canon_index(ws, primary_record, primary_card_paths, llm, force=False)
     ):
         return _read_file(output_path).strip()
 
-    print(f"  生成主资料基准索引：{primary_record['file_name']}")
-    card_items = [
-        (os.path.basename(path), _read_file(path))
-        for path in existing_cards
-    ]
-    canon_index = _run_prompt(
-        llm,
-        "world_canon_index",
-        dict(
-            source_name=primary_record["file_name"],
-            knowledge_cards=_format_knowledge_items(card_items),
-        ),
-        output_path,
-    )
+    print(f"  串行生成主资料基准索引：{primary_record['file_name']}")
+    partial_dir = os.path.join(_partials_dir(ws), "_canon_index")
+    os.makedirs(partial_dir, exist_ok=True)
+    previous_index = "（无，这是第一批主资料卡片。）"
+    total_steps = (len(existing_cards) + 1) // 2
+    canon_index = ""
+    for step_index, start in enumerate(range(0, len(existing_cards), 2), start=1):
+        selected_paths = existing_cards[start:start + 2]
+        card_items = [
+            (os.path.basename(path), _read_file(path))
+            for path in selected_paths
+        ]
+        print(f"  汇总主资料基准索引 {step_index}/{total_steps}")
+        canon_index = _run_prompt(
+            llm,
+            "world_canon_index",
+            dict(
+                source_name=primary_record["file_name"],
+                previous_index=previous_index,
+                knowledge_cards=_format_knowledge_items(card_items),
+            ),
+            os.path.join(partial_dir, f"partial_{step_index:03d}.md"),
+            required_headings=CANON_INDEX_SECTIONS,
+        )
+        previous_index = canon_index
+    _write_file(output_path, canon_index)
     print(f"  -> 主资料基准索引已保存：{output_path}")
     return canon_index
 
@@ -618,7 +725,7 @@ def _write_sections_to_final(ws, section_documents):
 
 
 def _build_source_all_sections(ws, record, card_paths, llm, force=False):
-    existing_cards = [path for path in card_paths if os.path.exists(path)]
+    existing_cards = [path for path in card_paths if _has_meaningful_file(path)]
     if not existing_cards:
         return None
 
@@ -633,7 +740,7 @@ def _build_source_all_sections(ws, record, card_paths, llm, force=False):
         for section_name, _ in WORLD_SECTIONS
     }
     if (
-        all(os.path.exists(path) for path in section_paths.values())
+        all(_has_meaningful_file(path) for path in section_paths.values())
         and not force
         and min(os.path.getmtime(path) for path in section_paths.values()) >= newest_card_mtime
     ):
@@ -662,10 +769,11 @@ def _build_source_all_sections(ws, record, card_paths, llm, force=False):
                     "构建完整的7栏目资料知识库。本轮只读取2个新的资料卡片和上一轮阶段摘要；"
                     "请在同一资料内部去重、补充和纠错，不要与其他资料做主次裁决。"
                 ),
-                previous_summary=previous_summary,
+                previous_summary=_compact_world_document(previous_summary),
                 knowledge_cards=_format_knowledge_items(card_items),
             ),
             os.path.join(source_partials_dir, f"partial_{step_index:03d}.md"),
+            required_headings=WORLD_SECTION_NAMES,
         )
         previous_summary = current_summary
 
@@ -673,7 +781,7 @@ def _build_source_all_sections(ws, record, card_paths, llm, force=False):
 
 
 def _build_single_source_sections(ws, record, card_paths, llm, force=False, max_workers=None):
-    existing_cards = [path for path in card_paths if os.path.exists(path)]
+    existing_cards = [path for path in card_paths if _has_meaningful_file(path)]
     if not existing_cards:
         return None
 
@@ -705,7 +813,7 @@ def _load_existing_source_sections(ws, records):
         section_paths = {
             section_name: _source_section_path(ws, record, section_name)
             for section_name, _ in WORLD_SECTIONS
-            if os.path.exists(_source_section_path(ws, record, section_name))
+            if _has_meaningful_file(_source_section_path(ws, record, section_name))
         }
         if not section_paths:
             print(f"  警告：未找到资料分栏知识库，跳过：{record['file_name']}")
@@ -737,7 +845,7 @@ def _integrate_final_sections(ws, source_items, llm, force=False, max_workers=No
         path
         for item in source_items
         for path in item.get("sections", {}).values()
-        if os.path.exists(path)
+        if _has_meaningful_file(path)
     ]
     if not source_section_paths:
         print("错误：未能生成最终分栏世界知识库。")
@@ -757,7 +865,7 @@ def _integrate_final_sections(ws, source_items, llm, force=False, max_workers=No
     )
     newest_source_mtime = max(os.path.getmtime(path) for path in source_section_paths)
     if (
-        all(os.path.exists(path) for path in final_paths.values())
+        all(_has_meaningful_file(path) for path in final_paths.values())
         and not force
         and min(os.path.getmtime(path) for path in final_paths.values()) >= newest_source_mtime
         and has_final_trace
@@ -769,7 +877,7 @@ def _integrate_final_sections(ws, source_items, llm, force=False, max_workers=No
     primary_paths = [
         (section_name, primary_item["sections"][section_name])
         for section_name, _ in WORLD_SECTIONS
-        if section_name in primary_item.get("sections", {}) and os.path.exists(primary_item["sections"][section_name])
+        if section_name in primary_item.get("sections", {}) and _has_meaningful_file(primary_item["sections"][section_name])
     ]
     current_summary = _aggregate_sections(primary_paths)
     if not supplement_items:
@@ -781,7 +889,7 @@ def _integrate_final_sections(ws, source_items, llm, force=False, max_workers=No
             supplement_paths = [
                 (section_name, item["sections"][section_name])
                 for section_name, _ in WORLD_SECTIONS
-                if section_name in item.get("sections", {}) and os.path.exists(item["sections"][section_name])
+                if section_name in item.get("sections", {}) and _has_meaningful_file(item["sections"][section_name])
             ]
             if not supplement_paths:
                 continue
@@ -800,10 +908,11 @@ def _integrate_final_sections(ws, source_items, llm, force=False, max_workers=No
                         "力量体系、技能体系、关键物品、角色实力/背景、世界观细节允许补充资料进行公共化校正和完善。"
                         "排除补充资料原创主角线、原创金手指和原创主线任务。"
                     ),
-                    previous_summary=current_summary,
-                    knowledge_cards=_aggregate_sections(supplement_paths),
+                    previous_summary=_compact_world_document(current_summary),
+                    knowledge_cards=_aggregate_sections(supplement_paths, max_chars=40000),
                 ),
                 os.path.join(final_all_partials_dir, f"integrated_{idx:03d}_{record['id']}.md"),
+                required_headings=WORLD_SECTION_NAMES,
             )
         _write_sections_to_final(ws, _split_sections_from_document(current_summary))
 
@@ -832,7 +941,7 @@ def _build_supplement_usage_audit(ws, source_items, llm, force=False):
         (f"{item['record'].get('file_name', '补充资料')} / {section_name}", path)
         for item in supplement_items
         for section_name, path in item.get("sections", {}).items()
-        if os.path.exists(path)
+        if _has_meaningful_file(path)
     ]
     if not final_paths or not supplement_paths:
         return None
@@ -866,8 +975,8 @@ def _build_supplement_usage_audit(ws, source_items, llm, force=False):
 
 # ── 公共入口：构建知识库 ──
 
-def build_world_knowledge(ws, llm, force=False, chunk_size=12000, merge_chunk_size=50000,
-                          chapter_batch_size=20, max_workers=None, primary_source=None,
+def build_world_knowledge(ws, llm, force=False, chunk_size=36000, merge_chunk_size=50000,
+                          chapter_batch_size=20, max_workers=4, primary_source=None,
                           merge_only=False):
     """Build structured target-world knowledge from imported source files."""
     _ = merge_chunk_size  # 保留旧参数兼容；当前合并固定按每轮2张 card 串行处理。
@@ -914,6 +1023,7 @@ def build_world_knowledge(ws, llm, force=False, chunk_size=12000, merge_chunk_si
             llm,
             force=force,
             canon_index="",
+            max_workers=max_workers,
         )
 
     canon_index = _build_canon_index(
@@ -943,13 +1053,14 @@ def build_world_knowledge(ws, llm, force=False, chunk_size=12000, merge_chunk_si
             force=force,
             canon_index=canon_index,
             dependency_mtime=canon_index_mtime,
+            max_workers=max_workers,
         )
 
     existing_cards = [
         path
         for paths in card_paths_by_source.values()
         for path in paths
-        if os.path.exists(path)
+        if _has_meaningful_file(path)
     ]
     if not existing_cards:
         print("错误：资料分片为空，无法生成世界知识库。")
@@ -997,6 +1108,19 @@ def load_world_knowledge_context(ws, max_chars=80000):
     if len(content) <= max_chars:
         return content
     return content[:max_chars] + "\n\n（目标世界知识库内容过长，以上为截断后的前置摘要。）"
+
+
+def world_knowledge_status(ws):
+    """返回资料库是否已具备可注入下游生成的完整7栏目。"""
+    manifest = _load_manifest(ws)
+    source_count = len(_source_records(ws))
+    final_section_count = len(_final_section_paths(ws))
+    return {
+        "enabled": bool(manifest.get("enabled", True)),
+        "source_count": source_count,
+        "final_section_count": final_section_count,
+        "ready": final_section_count == len(WORLD_SECTIONS),
+    }
 
 
 def set_world_knowledge_enabled(ws, enabled: bool) -> bool:

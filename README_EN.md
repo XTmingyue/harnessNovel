@@ -356,7 +356,8 @@ novel novel-outline my-new-novel --direction "inspiration input"
 - `--file PATH`: Mechanics settings file path. Used by `mechanics-init`.
 - `--none`: Explicitly disable the mechanics layer. Used by `mechanics-init`.
 - `--chapter-batch-size N`: Number of chapters per batch for chapter-like materials. Default: 20. Falls back to character chunks when chapters cannot be detected. Used only by `world-build`.
-- `--chunk-size N`: Target-genre material chunk size in characters. Default: 12000. Used only by `world-build`.
+- `--chunk-size N`: Target-world material chunk size in characters. Default: 36000. Used only by `world-build`; chapter sources are also capped at 20 chapters per batch.
+- `--max-workers N`: Parallel extraction workers for target-world chapter batches. Default: 4; aggregation starts after all batches finish.
 - `--max-workers N`: Compatibility parameter. The current `world-build` uses all-section summarization and usually does not need this.
 - `--primary NAME`: Specify the main source for `world-build`. Accepts file name, path, or material ID. If omitted, the largest file is used by default.
 - `--merge-only`: Rebuild only `worlds/_final/*.md` and audits from existing `worlds/<source>/*.md`; does not re-extract cards.

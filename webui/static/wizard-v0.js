@@ -287,7 +287,7 @@ function inferredDone(step) {
   if (!summary) return false;
   if (wizardState.confirmed.has(step.id)) return true;
   if (step.id === "reference") return summary.reference.has_sample && summary.reference.chapter_count > 0;
-  if (step.id === "world") return summary.world_knowledge.final_section_count > 0;
+  if (step.id === "world") return Boolean(summary.world_knowledge.ready);
   if (step.id === "design") return Boolean(summary.story_design?.concept_ready);
   if (step.id === "stage") return Boolean(summary.story_design?.stage_ready);
   if (step.id === "mechanics") return summary.mechanics.mode !== "未初始化";
@@ -1327,7 +1327,7 @@ function worldSources() {
 
 function worldForm() {
   const sources = worldSources();
-  const worldReady = Number(wizardState.summary?.world_knowledge?.final_section_count || 0) > 0;
+  const worldReady = Boolean(wizardState.summary?.world_knowledge?.ready);
   const sourceList = sources.length
     ? `<div class="world-uploaded">
         <div class="world-uploaded-heading"><span>已上传</span><strong>${sources.length} 份资料</strong></div>
@@ -1343,7 +1343,7 @@ function worldForm() {
     </div>
     ${sources.length ? `<div class="world-enable-row">
       <label class="world-toggle"><input id="world-enabled" type="checkbox" ${wizardState.summary?.world_knowledge?.enabled === false ? "" : "checked"} /><span class="world-toggle-text">启用目标世界资料库</span></label>
-      <small>${worldReady ? "已构建资料库。关闭后后续设计不再注入资料；再次打开即恢复使用。" : "导入后点下方按钮开始构建。构建完成默认启用，可随时关闭。"}</small>
+      <small>${worldReady ? "资料库 7 个栏目已完整构建。关闭后后续设计不再注入资料；再次打开即恢复使用。" : "导入后会自动构建；若任务中断，可不上传新文件，直接点击下方按钮重试。"}</small>
     </div>` : ""}`;
 }
 
@@ -1463,7 +1463,7 @@ function formForStep(step) {
             <small id="reference-file-help">${selectedFile ? "系统会匹配已拆章节，只拆解新增部分。" : "系统会自动跳过已拆章节，并重新检查末尾故事片段。"}</small>
           </label>
           <p id="reference-file-status" class="reference-file-status">${selectedFile ? `新文件：${escapeHtml(selectedFile.name)}（${Math.ceil(selectedFile.size / 1024).toLocaleString()} KB）` : (reference.isComplete ? "尚未选择新文件" : "无需重新上传，可直接重试尚未完成的拆解步骤")}</p>
-          ${reference.isComplete || selectedFile ? "" : referenceScopeControls(defaultTarget)}
+          ${referenceScopeControls(defaultTarget, reference.isComplete && !selectedFile)}
         </div>`;
     }
     const selectedFile = wizardState.referenceFile;
@@ -1553,14 +1553,17 @@ function bindReferenceSource() {
     const label = $("#reference-file-label");
     const help = $("#reference-file-help");
     const action = $("#v0-step-form .primary-button");
-    if (scope) scope.hidden = Boolean(file);
+    if (scope) {
+      scope.hidden = false;
+      scope.disabled = !file && referenceStatus().isComplete;
+    }
     if (picker) picker.classList.toggle("selected", Boolean(file));
     if (label) label.textContent = file ? "已选择新版整本小说" : (hasExisting ? "上传作者更新后的整本小说" : "导入小说内容");
     if (help) help.textContent = file
       ? "系统会匹配已拆章节，只拆解新增部分；可重新选择文件。"
       : (hasExisting ? "上传重新下载的完整 TXT，并重新检查末尾故事片段。" : "支持 TXT 文件。后台会检测编码，非 UTF-8 文本会自动转换后再拆解。");
     if (status) status.textContent = file
-      ? `已选择：${file.name}（${Math.ceil(file.size / 1024).toLocaleString()} KB），将自动识别新增章节。`
+      ? `已选择：${file.name}（${Math.ceil(file.size / 1024).toLocaleString()} KB），请设置本次拆解范围。`
       : (hasExisting
         ? (referenceStatus().isComplete ? "尚未选择新文件。" : "无需重新上传，可直接重试尚未完成的拆解步骤。")
         : "先选择小说文件，再设置拆解范围。");
@@ -1570,6 +1573,8 @@ function bindReferenceSource() {
         ? "重试未完成步骤"
         : "导入并开始拆解";
     }
+    const maxInput = $("#reference-max-chapters");
+    if (maxInput) maxInput.disabled = !file || wizardState.referenceScope !== "prefix";
   });
   $$('input[name="reference-scope"]').forEach((input) => input.addEventListener("change", () => {
     if (!input.checked) return;
@@ -1680,7 +1685,7 @@ async function submitWorldStep() {
   const files = [...($("#world-file-input")?.files || [])];
   if (files.length) {
     const uploads = await Promise.all(files.map(uploadFile));
-    await startTask("world_import", { upload_ids: uploads.map((upload) => upload.id) }, "已开始导入目标世界资料。导入完成后自动构建（以最大文件为主资料）。");
+    await startTask("world_import", { upload_ids: uploads.map((upload) => upload.id) }, "已开始导入并构建目标世界资料库（以最大文件为主资料）。");
     return;
   }
   const sources = worldSources();
@@ -1788,8 +1793,6 @@ async function submitReferenceStep() {
     taskType = "init";
   } else if (wizardState.referenceFile) {
     args.reference_upload_id = (await uploadFile(wizardState.referenceFile)).id;
-    // 新版快照的总章节数尚未知，默认识别公共前缀后拆解全部新增内容。
-    if (scope === "prefix") delete args.max_chapters;
   }
   await startTask(taskType, args, reference.hasExisting ? "已开始继续拆解参考小说，可在任务日志中查看进度。" : "已开始导入并拆解参考小说，可在任务日志中查看编码识别与进度。");
   wizardState.referenceFile = null;
@@ -2710,6 +2713,8 @@ async function refreshWorkspaceOptions(selectedName = "") {
     ? data.items.map((item) => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join("")
     : '<option value="">还没有工作区</option>';
   if (selectedName && data.items.some((item) => item.name === selectedName)) select.value = selectedName;
+  const deleteButton = $("#delete-workspace");
+  if (deleteButton) deleteButton.disabled = !data.items.length;
   return data;
 }
 
@@ -2743,6 +2748,28 @@ async function createWorkspace(event) {
     await activateTask(task, "工作区已创建，请在第一步导入参考小说。 ");
   } finally {
     submit.disabled = false;
+  }
+}
+
+async function deleteCurrentWorkspace() {
+  const name = wizardState.workspace || $("#workspace-select")?.value || "";
+  if (!name) throw new Error("当前没有可删除的工作区。");
+  const confirmed = window.confirm(
+    `确认删除当前工作区“${name}”？\n\n对应的本地文件、生成内容、任务日志和 Prompt 都会被永久删除，此操作无法恢复。`,
+  );
+  if (!confirmed) return;
+
+  const button = $("#delete-workspace");
+  button.disabled = true;
+  try {
+    await api(`/api/workspaces/${encodeURIComponent(name)}`, { method: "DELETE" });
+    const data = await refreshWorkspaceOptions();
+    const nextName = data.items[0]?.name || "";
+    $("#workspace-select").value = nextName;
+    await selectWorkspace(nextName);
+    showToast(`工作区“${name}”已删除。`);
+  } finally {
+    button.disabled = !$("#workspace-select")?.value;
   }
 }
 
@@ -2784,6 +2811,9 @@ async function boot() {
     const select = $("#workspace-select");
     select.addEventListener("change", () => selectWorkspace(select.value));
     $("#new-workspace").addEventListener("click", openWorkspacePanel);
+    $("#delete-workspace").addEventListener("click", async () => {
+      try { await deleteCurrentWorkspace(); } catch (error) { showToast(error.message || "无法删除工作区。", true); }
+    });
     $("#new-workspace-form").addEventListener("submit", async (event) => {
       try { await createWorkspace(event); } catch (error) { showToast(error.message || "无法创建工作区。", true); }
     });

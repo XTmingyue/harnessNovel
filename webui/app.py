@@ -19,6 +19,7 @@ from webui.task_runner import (
     TaskManager,
     UploadStore,
     WorkspaceStore,
+    require_workspace_name,
 )
 from webui.design_chat import DesignChatManager
 from webui.arc_chat import ArcsChatManager
@@ -166,6 +167,51 @@ class WebRuntime:
     def _persist_root(self) -> None:
         _save_web_settings({"workspace_root": str(self.store.root)})
 
+    @staticmethod
+    def _chat_manager_busy(manager: Any, workspace: str) -> bool:
+        lock = getattr(manager, "_jobs_lock", None) or getattr(manager, "_lock", None)
+        jobs = getattr(manager, "_jobs", {})
+        if lock is None:
+            return False
+        with lock:
+            return any(
+                isinstance(key, tuple)
+                and key
+                and key[0] == workspace
+                and job.get("status") in {"running", "pausing", "paused", "stopping"}
+                for key, job in jobs.items()
+            )
+
+    @staticmethod
+    def _forget_chat_workspace(manager: Any, workspace: str) -> None:
+        lock = getattr(manager, "_jobs_lock", None) or getattr(manager, "_lock", None)
+        if lock is None:
+            return
+        with lock:
+            for attr in ("_jobs", "_cache"):
+                values = getattr(manager, attr, {})
+                keys = [
+                    key for key in values
+                    if isinstance(key, tuple) and key and key[0] == workspace
+                ]
+                for key in keys:
+                    values.pop(key, None)
+
+    def delete_workspace(self, name: str) -> dict[str, Any]:
+        name = require_workspace_name(name)
+        managers = (self.design_chat, self.arcs_chat, self.chapters_chat, self.draft_chat)
+        if any(self._chat_manager_busy(manager, name) for manager in managers):
+            raise ValueError("该工作区仍有内容生成任务正在执行，请先结束任务再删除。")
+        self.tasks.begin_workspace_delete(name)
+        try:
+            result = self.store.delete_workspace(name)
+            task_result = self.tasks.delete_workspace_records(name)
+            for manager in managers:
+                self._forget_chat_workspace(manager, name)
+            return {**result, **task_result}
+        finally:
+            self.tasks.end_workspace_delete(name)
+
 
 def _http_error(exc: Exception, status_code: int = 400) -> HTTPException:
     return HTTPException(status_code=status_code, detail=str(exc))
@@ -240,6 +286,15 @@ def create_app(workspace_root: str | None = None) -> FastAPI:
     def workspace_summary(name: str) -> dict[str, Any]:
         try:
             return runtime.store.summary(name)
+        except FileNotFoundError as exc:
+            raise _http_error(ValueError("工作区不存在。"), 404) from exc
+        except ValueError as exc:
+            raise _http_error(exc) from exc
+
+    @app.delete("/api/workspaces/{name}")
+    def delete_workspace(name: str) -> dict[str, Any]:
+        try:
+            return runtime.delete_workspace(name)
         except FileNotFoundError as exc:
             raise _http_error(ValueError("工作区不存在。"), 404) from exc
         except ValueError as exc:

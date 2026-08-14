@@ -353,7 +353,8 @@ novel novel-outline 我的新小说 --direction "灵感输入"
 - `--file PATH`：机制层设定文件路径，适用于 `mechanics-init`
 - `--none`：显式关闭机制层，适用于 `mechanics-init`
 - `--chapter-batch-size N`：章节资料每批章节数，默认 20；识别不到章节时才使用字符分片（仅 world-build）
-- `--chunk-size N`：目标题材资料分片字符数，默认 12000（仅 world-build）
+- `--chunk-size N`：目标题材资料分片字符数，默认 36000（仅 world-build；章节资料同时受每批最多 20 章限制）
+- `--max-workers N`：目标世界资料章节批次的并行提取数，默认 4；全部批次完成后再串行汇总
 - `--max-workers N`：兼容旧版参数；当前 world-build 使用全栏目汇总，通常无需设置
 - `--primary NAME`：指定 world-build 主资料，可填文件名、路径或资料 ID；不指定时默认最大文件
 - `--merge-only`：只基于已有 `worlds/<资料名>/*.md` 重建 `worlds/_final/` 和审计，不重新提取 cards

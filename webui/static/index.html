@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f5f7f5" />
     <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
     <title>HarnessNovel 工作台</title>
-  <link rel="stylesheet" href="/assets/wizard-v0.css?v=45" />
+  <link rel="stylesheet" href="/assets/wizard-v0.css?v=46" />
   </head>
   <body>
     <div class="wizard-shell">
@@ -18,7 +18,10 @@
         <div class="workspace-switch">
           <label class="rail-label" for="workspace-select">当前作品</label>
           <select id="workspace-select" class="workspace-select"></select>
-          <button id="new-workspace" class="rail-new" type="button">+ 新建工作区</button>
+          <div class="rail-workspace-actions">
+            <button id="new-workspace" class="rail-new" type="button">+ 新建工作区</button>
+            <button id="delete-workspace" class="rail-delete" type="button">删除当前</button>
+          </div>
         </div>
         <nav class="workflow-nav" aria-label="创作流程">
           <h2>创作流程</h2>
@@ -88,6 +91,6 @@
       </form>
     </section>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/assets/wizard-v0.js?v=42"></script>
+  <script src="/assets/wizard-v0.js?v=46"></script>
   </body>
 </html>

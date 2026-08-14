@@ -40,8 +40,13 @@ button:disabled { cursor: not-allowed; }
 .rail-label { display: block; margin-bottom: 8px; color: var(--rail-muted); font-size: 13px; font-weight: 700; letter-spacing: .06em; }
 .workspace-select { width: 100%; height: 36px; padding: 0 9px; border: 1px solid #45564f; border-radius: 5px; color: #f4faf6; background: #21332d; font-size: 13px; outline: none; }
 .workspace-select:focus { border-color: #86b9a8; }
-.rail-new { width: 100%; margin-top: 9px; padding: 0; border: 0; color: #b7c8bf; background: none; text-align: left; font-size: 13px; }
+.rail-workspace-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 9px; }
+.rail-new, .rail-delete { padding: 0; border: 0; background: none; font-size: 13px; }
+.rail-new { color: #b7c8bf; text-align: left; }
 .rail-new:hover { color: #fff; }
+.rail-delete { color: #8fa198; }
+.rail-delete:hover { color: #ffb4a7; }
+.rail-delete:disabled { color: #5d6c65; opacity: .55; }
 
 .workflow-nav { flex: 1; min-height: 0; padding: 18px 0; }
 .workflow-nav h2 { margin: 0 0 11px 2px; color: var(--rail-muted); font-size: 11px; font-weight: 700; letter-spacing: .09em; }

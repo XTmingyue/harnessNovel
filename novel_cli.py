@@ -453,15 +453,29 @@ def cmd_novel_outline(args):
 
 
 def cmd_world_import(args):
-    from training.adaptive_builder import import_target_world_sources
+    from training.adaptive_builder import (
+        build_target_world_knowledge,
+        import_target_world_sources,
+    )
     ws = _ws(args.workspace)
     import_target_world_sources(ws, args.paths, force=args.force)
+    if getattr(args, "build", False):
+        result = build_target_world_knowledge(
+            ws,
+            force=False,
+            chunk_size=args.chunk_size,
+            chapter_batch_size=args.chapter_batch_size,
+            max_workers=args.max_workers,
+            primary_source=args.primary,
+        )
+        if not result:
+            raise RuntimeError("目标世界资料已导入，但资料库构建失败，请检查任务日志后重试。")
 
 
 def cmd_world_build(args):
     from training.adaptive_builder import build_target_world_knowledge
     ws = _ws(args.workspace)
-    build_target_world_knowledge(
+    result = build_target_world_knowledge(
         ws,
         force=args.force,
         chunk_size=args.chunk_size,
@@ -470,6 +484,8 @@ def cmd_world_build(args):
         primary_source=args.primary,
         merge_only=args.merge_only,
     )
+    if not result:
+        raise RuntimeError("目标世界资料库构建失败，请检查任务日志后重试。")
 
 
 def cmd_novel_name_synopsis(args):
@@ -636,14 +652,19 @@ def main():
     p.add_argument("workspace", help="工作区名称")
     p.add_argument("paths", nargs="+", help="资料文件或目录路径，可传多个")
     p.add_argument("--force", action="store_true", help="覆盖已导入的同源文件")
+    p.add_argument("--build", action="store_true", help="导入完成后立即构建目标世界资料库")
+    p.add_argument("--chunk-size", type=int, default=36000, help="构建时的资料分片字符数（默认36000）")
+    p.add_argument("--chapter-batch-size", type=int, default=20, help="构建时每批最多处理章节数（默认20，同时受分片字符数限制）")
+    p.add_argument("--max-workers", type=int, default=4, help="章节批次并行提取数（默认4）")
+    p.add_argument("--primary", default=None, help="指定主资料；不指定时默认使用最大文件")
 
     # world-build
     p = sub.add_parser("world-build", help="结构化梳理目标题材资料")
     p.add_argument("workspace", help="工作区名称")
     p.add_argument("--force", action="store_true", help="强制重新结构化和汇总")
-    p.add_argument("--chunk-size", type=int, default=12000, help="资料分片字符数（默认12000）")
+    p.add_argument("--chunk-size", type=int, default=36000, help="资料分片字符数（默认36000）")
     p.add_argument("--chapter-batch-size", type=int, default=20, help="章节资料每批章节数（默认20）")
-    p.add_argument("--max-workers", type=int, default=None, help="兼容参数：旧版分栏并行数，当前全栏目汇总模式通常无需设置")
+    p.add_argument("--max-workers", type=int, default=4, help="章节批次并行提取数（默认4）")
     p.add_argument("--primary", default=None, help="指定主资料，可填文件名、路径或资料ID；不指定时默认最大文件")
     p.add_argument("--merge-only", action="store_true", help="只基于已有 worlds/<资料名>/*.md 重建 worlds/_final 和审计，跳过 cards/canon/source worlds")
 

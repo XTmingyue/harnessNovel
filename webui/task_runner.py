@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -27,7 +28,7 @@ TASK_LABELS = {
     "workspace_init": "创建工作区",
     "init": "初始化并拆解参考小说",
     "reference_resume": "继续拆解参考小说",
-    "world_import": "导入目标题材资料",
+    "world_import": "导入并构建目标世界资料库",
     "world_build": "构建目标世界资料库",
     "novel_outline": "设计核心玩法与全书舞台",
     "design_concept": "生成世界观、粗略大纲与阶段粗纲",
@@ -125,6 +126,19 @@ class WorkspaceStore:
             })
         return sorted(items, key=lambda item: item["updated_at"], reverse=True)
 
+    def delete_workspace(self, name: str) -> dict[str, Any]:
+        """删除一个明确位于工作区根目录内的工作空间。"""
+        safe_name = require_workspace_name(name)
+        path = self.workspace_path(safe_name)
+        if not path.is_dir():
+            raise FileNotFoundError(safe_name)
+        # workspace_path 已通过 resolve + relative_to 防止路径越界；这里再约束
+        # 目标必须是根目录的直接子目录，避免未来路径规则变化扩大删除范围。
+        if path.parent != self.root or path == self.root:
+            raise ValueError("非法工作区删除路径。")
+        shutil.rmtree(path)
+        return {"deleted": True, "workspace": safe_name}
+
     def _volume_details(self, base: Path, fs: Path) -> list[dict[str, Any]]:
         """列出每个舞台/卷的故事情节单元和章节数据。"""
         details = []
@@ -206,7 +220,11 @@ class WorkspaceStore:
         manifest = self._load_json(fs / "world_knowledge" / "manifest.json") or {}
         source_records = manifest.get("sources", []) if isinstance(manifest.get("sources", []), list) else []
         world_sources = len(source_records)
-        world_sections = self._count_files(fs / "world_knowledge" / "worlds" / "_final", {".md"})
+        world_final_dir = fs / "world_knowledge" / "worlds" / "_final"
+        world_sections = sum(
+            1 for path in world_final_dir.glob("*.md")
+            if path.is_file() and path.read_text(encoding="utf-8", errors="ignore").strip()
+        ) if world_final_dir.is_dir() else 0
         world_enabled = bool(manifest.get("enabled", True)) if isinstance(manifest, dict) else True
         design_dir = fs / "story_design"
 
@@ -337,6 +355,7 @@ class WorkspaceStore:
                 "enabled": world_enabled,
                 "source_count": world_sources,
                 "final_section_count": world_sections,
+                "ready": world_sections == 7,
                 "sources": [
                     {
                         "id": str(source.get("id") or ""),
@@ -662,6 +681,7 @@ class TaskManager:
         self.uploads = uploads
         self._tasks: dict[str, TaskRecord] = {}
         self._active_workspaces: set[str] = set()
+        self._deleting_workspaces: set[str] = set()
         self._lock = threading.RLock()
         self._load_records()
 
@@ -717,6 +737,8 @@ class TaskManager:
         args = args or {}
         command = self._build_command(task_type, workspace, args)
         with self._lock:
+            if workspace in self._deleting_workspaces:
+                raise ValueError("该工作区正在删除，不能开始新任务。")
             if workspace in self._active_workspaces:
                 raise ValueError("该工作区已有任务正在执行，请等待它结束。")
             # 让初始化任务在界面中立即可见，并由 CLI 在随后补齐标准目录结构。
@@ -835,6 +857,33 @@ class TaskManager:
             "skipped_active_count": skipped,
         }
 
+    def delete_workspace_records(self, workspace: str) -> dict[str, Any]:
+        """删除指定工作空间的已结束任务记录、日志与 Prompt。"""
+        workspace = require_workspace_name(workspace)
+        with self._lock:
+            tasks = [task for task in self._tasks.values() if task.workspace == workspace]
+            if any(task.status in {"queued", "running"} for task in tasks):
+                raise ValueError("该工作区仍有任务正在执行，请先结束任务再删除。")
+            task_ids = [task.id for task in tasks]
+        for task_id in task_ids:
+            self.delete(task_id)
+        return {"workspace": workspace, "removed_task_count": len(task_ids)}
+
+    def begin_workspace_delete(self, workspace: str) -> None:
+        """原子阻止新 CLI 任务进入待删除工作空间。"""
+        workspace = require_workspace_name(workspace)
+        with self._lock:
+            if workspace in self._active_workspaces or any(
+                task.workspace == workspace and task.status in {"queued", "running"}
+                for task in self._tasks.values()
+            ):
+                raise ValueError("该工作区仍有后台任务正在执行，请先等待或结束任务再删除。")
+            self._deleting_workspaces.add(workspace)
+
+    def end_workspace_delete(self, workspace: str) -> None:
+        with self._lock:
+            self._deleting_workspaces.discard(workspace)
+
     def _run(self, task: TaskRecord, command: list[str]) -> None:
         with self._lock:
             task.status = "running"
@@ -947,7 +996,7 @@ class TaskManager:
             if not isinstance(ids, list) or not ids:
                 raise ValueError("请至少上传一份目标题材资料。")
             paths = [str(self.uploads.resolve(str(upload_id))) for upload_id in ids]
-            command += ["world-import", workspace, *paths]
+            command += ["world-import", workspace, *paths, "--build"]
             if force:
                 command.append("--force")
             return command

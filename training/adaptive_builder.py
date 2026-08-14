@@ -23,6 +23,7 @@ from core.world_knowledge import (
     build_world_knowledge,
     import_world_sources,
     load_world_knowledge_context,
+    world_knowledge_status,
 )
 from training.reference_finder import (
     list_reference_volumes,
@@ -118,9 +119,20 @@ def _load_outline_rules(ws):
     return rules or "（无大纲设计规则）"
 
 
-def _load_world_knowledge_optional(ws, purpose):
+def _load_world_knowledge_optional(ws, purpose, max_chars=80000, require_ready=False):
     """加载目标世界知识库；不存在时降级为纯参考小说+创作方向流程。"""
-    world_knowledge = load_world_knowledge_context(ws)
+    status = world_knowledge_status(ws)
+    if (
+        require_ready
+        and status["enabled"]
+        and status["source_count"] > 0
+        and not status["ready"]
+    ):
+        raise RuntimeError(
+            "已上传并启用目标世界资料，但资料库尚未完整构建。"
+            "请返回“目标世界”步骤重试构建，完成7个栏目后再生成全书设计。"
+        )
+    world_knowledge = load_world_knowledge_context(ws, max_chars=max_chars)
     if world_knowledge:
         print(f"  -> 已加载目标世界资料库用于{purpose}。")
         return world_knowledge
@@ -1835,9 +1847,15 @@ def gen_design_concept(
     worldview = existing_worldview if not force else ""
     report("worldview", 0, "正在生成新小说世界观")
     if not _is_real_design_field(worldview):
+        # 目标世界资料是世界观生成的事实边界；参考小说只提供结构功能。
+        # 控制在 6 万字符内，避免与参考全书大纲叠加后挤占模型上下文。
+        world_knowledge = _load_world_knowledge_optional(
+            ws, "新小说世界观", max_chars=60000, require_ready=True,
+        )
         prompt = PromptLoader.load(
             "design_worldview",
             creative_direction=direction or "（用户未提供具体方向）",
+            world_knowledge=world_knowledge or "（未提供目标世界资料库，请创建原创世界。）",
             reference_outline=reference_outline,
         )
         payload = parse_json_response(_call_design_llm(llm, prompt, "新小说世界观"))
@@ -2802,8 +2820,8 @@ def import_target_world_sources(ws, paths, force=False):
     return result
 
 
-def build_target_world_knowledge(ws, force=False, chunk_size=12000, chapter_batch_size=20,
-                                 max_workers=None, primary_source=None, merge_only=False):
+def build_target_world_knowledge(ws, force=False, chunk_size=36000, chapter_batch_size=20,
+                                 max_workers=4, primary_source=None, merge_only=False):
     """将已导入资料结构化为目标世界知识库。"""
     llm = _get_lite_llm()
     if not llm:
