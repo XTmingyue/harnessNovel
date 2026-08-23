@@ -355,9 +355,9 @@ novel novel-outline 我的新小说 --direction "灵感输入"
 - `--chapter-batch-size N`：章节资料每批章节数，默认 20；识别不到章节时才使用字符分片（仅 world-build）
 - `--chunk-size N`：目标题材资料分片字符数，默认 36000（仅 world-build；章节资料同时受每批最多 20 章限制）
 - `--max-workers N`：目标世界资料章节批次的并行提取数，默认 4；全部批次完成后再串行汇总
-- `--max-workers N`：兼容旧版参数；当前 world-build 使用全栏目汇总，通常无需设置
 - `--primary NAME`：指定 world-build 主资料，可填文件名、路径或资料 ID；不指定时默认最大文件
 - `--merge-only`：只基于已有 `worlds/<资料名>/*.md` 重建 `worlds/_final/` 和审计，不重新提取 cards
+- `world-build` 默认复用章节资料卡、主资料索引、资料级汇总和最终融合检查点；只有显式传入 `--force` 才会从头重建
 - `--volume N`：指定卷号，默认 1；新流程中一卷对应 `stage_roadmap.md` 中的一个舞台
 - `--stage N`：兼容旧命令的别名，等同于 `--volume`，不表示“卷内 stage”；适用于 `story-arcs`、`chapter-outlines`、`write`
 - `--after-stage N` / `--before-stage N`：插入新舞台时指定相对位置（仅 stage-insert）
@@ -375,10 +375,6 @@ novel novel-outline 我的新小说 --direction "灵感输入"
 <p align="left">
   <img src="docs/qrcode.png" width="400" alt="公众号二维码">
 </p>
-
-## Star History
-
-## Star History
 
 ## Star History
 

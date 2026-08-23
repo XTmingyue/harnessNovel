@@ -1690,7 +1690,7 @@ async function submitWorldStep() {
   }
   const sources = worldSources();
   if (!sources.length) throw new Error("请先选择至少一份目标世界资料。");
-  await startTask("world_build", { force: true }, "已开始构建目标世界资料库，可在任务日志中查看进度。");
+  await startTask("world_build", { force: false }, "已从已有断点继续构建目标世界资料库，可在任务日志中查看进度。");
 }
 
 async function submitMechanicsStep() {

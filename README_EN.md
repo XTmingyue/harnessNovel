@@ -358,9 +358,9 @@ novel novel-outline my-new-novel --direction "inspiration input"
 - `--chapter-batch-size N`: Number of chapters per batch for chapter-like materials. Default: 20. Falls back to character chunks when chapters cannot be detected. Used only by `world-build`.
 - `--chunk-size N`: Target-world material chunk size in characters. Default: 36000. Used only by `world-build`; chapter sources are also capped at 20 chapters per batch.
 - `--max-workers N`: Parallel extraction workers for target-world chapter batches. Default: 4; aggregation starts after all batches finish.
-- `--max-workers N`: Compatibility parameter. The current `world-build` uses all-section summarization and usually does not need this.
 - `--primary NAME`: Specify the main source for `world-build`. Accepts file name, path, or material ID. If omitted, the largest file is used by default.
 - `--merge-only`: Rebuild only `worlds/_final/*.md` and audits from existing `worlds/<source>/*.md`; does not re-extract cards.
+- `world-build` reuses checkpoints for extracted cards, the canon index, per-source aggregation, and final integration by default. Only explicit `--force` rebuilds from scratch.
 - `--volume N`: Volume number. Default: 1. In the new flow, one volume corresponds to one stage in `stage_roadmap.md`.
 - `--stage N`: Backward-compatible alias for `--volume`; it does not mean a stage inside a volume. Used by `story-arcs`, `chapter-outlines`, and `write`.
 - `--after-stage N` / `--before-stage N`: Relative insertion position for a new stage. Used only by `stage-insert`.
@@ -378,8 +378,6 @@ novel novel-outline my-new-novel --direction "inspiration input"
 <p align="left">
   <img src="docs/qrcode.png" width="400" alt="QR code">
 </p>
-
-## Star History
 
 ## Star History
 

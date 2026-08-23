@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
@@ -97,8 +98,16 @@ def _read_file(path):
 
 def _write_file(path, content):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(content.rstrip() + "\n")
+    temporary = f"{path}.tmp-{os.getpid()}-{threading.get_ident()}"
+    try:
+        with open(temporary, "w", encoding="utf-8") as f:
+            f.write(content.rstrip() + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
 
 
 def _require_headings(content, headings, label):
@@ -112,6 +121,21 @@ def _require_headings(content, headings, label):
 
 def _has_meaningful_file(path):
     return bool(os.path.exists(path) and _read_file(path).strip())
+
+
+def _load_fresh_checkpoint(path, dependencies, required_headings, force=False):
+    """读取仍然有效的阶段检查点；依赖变更或格式损坏时返回空串。"""
+    if force or not _has_meaningful_file(path):
+        return ""
+    dependency_paths = [item for item in dependencies if item and os.path.exists(item)]
+    if dependency_paths and os.path.getmtime(path) < max(os.path.getmtime(item) for item in dependency_paths):
+        return ""
+    content = _read_file(path).strip()
+    try:
+        _require_headings(content, required_headings, "断点文件")
+    except RuntimeError:
+        return ""
+    return content
 
 
 def _run_prompt(llm, folder, prompt_vars, output_path, required_headings=None):
@@ -612,6 +636,12 @@ def _build_record_cards(ws, record, slices, llm, force=False, canon_index="",
 
         pending.append((idx, source_slice, card_path))
 
+    reused_count = len(source_card_paths) - len(pending)
+    if reused_count:
+        print(
+            f"  断点续传{record['role_label']}《{record['file_name']}》："
+            f"复用 {reused_count}/{len(source_card_paths)} 个已完成资料卡"
+        )
     if not pending:
         return source_card_paths
 
@@ -668,16 +698,23 @@ def _build_canon_index(ws, primary_record, primary_card_paths, llm, force=False)
     output_path = _canon_index_path(ws)
     newest_card_mtime = max(os.path.getmtime(path) for path in existing_cards)
     if (
-        os.path.exists(output_path)
+        _has_meaningful_file(output_path)
         and not force
         and os.path.getmtime(output_path) >= newest_card_mtime
     ):
-        return _read_file(output_path).strip()
+        existing_index = _read_file(output_path).strip()
+        try:
+            _require_headings(existing_index, CANON_INDEX_SECTIONS, "主资料基准索引")
+            print("  -> 复用已完成的主资料基准索引。")
+            return existing_index
+        except RuntimeError:
+            pass
 
     print(f"  串行生成主资料基准索引：{primary_record['file_name']}")
     partial_dir = os.path.join(_partials_dir(ws), "_canon_index")
     os.makedirs(partial_dir, exist_ok=True)
     previous_index = "（无，这是第一批主资料卡片。）"
+    previous_checkpoint = None
     total_steps = (len(existing_cards) + 1) // 2
     canon_index = ""
     for step_index, start in enumerate(range(0, len(existing_cards), 2), start=1):
@@ -686,19 +723,30 @@ def _build_canon_index(ws, primary_record, primary_card_paths, llm, force=False)
             (os.path.basename(path), _read_file(path))
             for path in selected_paths
         ]
-        print(f"  汇总主资料基准索引 {step_index}/{total_steps}")
-        canon_index = _run_prompt(
-            llm,
-            "world_canon_index",
-            dict(
-                source_name=primary_record["file_name"],
-                previous_index=previous_index,
-                knowledge_cards=_format_knowledge_items(card_items),
-            ),
-            os.path.join(partial_dir, f"partial_{step_index:03d}.md"),
-            required_headings=CANON_INDEX_SECTIONS,
+        checkpoint_path = os.path.join(partial_dir, f"partial_{step_index:03d}.md")
+        canon_index = _load_fresh_checkpoint(
+            checkpoint_path,
+            [*selected_paths, previous_checkpoint],
+            CANON_INDEX_SECTIONS,
+            force=force,
         )
+        if canon_index:
+            print(f"  断点续传主资料基准索引 {step_index}/{total_steps}")
+        else:
+            print(f"  汇总主资料基准索引 {step_index}/{total_steps}")
+            canon_index = _run_prompt(
+                llm,
+                "world_canon_index",
+                dict(
+                    source_name=primary_record["file_name"],
+                    previous_index=previous_index,
+                    knowledge_cards=_format_knowledge_items(card_items),
+                ),
+                checkpoint_path,
+                required_headings=CANON_INDEX_SECTIONS,
+            )
         previous_index = canon_index
+        previous_checkpoint = checkpoint_path
     _write_file(output_path, canon_index)
     print(f"  -> 主资料基准索引已保存：{output_path}")
     return canon_index
@@ -747,6 +795,7 @@ def _build_source_all_sections(ws, record, card_paths, llm, force=False):
         return section_paths
 
     previous_summary = "（无，这是该资料的第一轮全栏目汇总。）"
+    previous_checkpoint = None
     total_steps = (len(existing_cards) + 1) // 2
     current_summary = ""
 
@@ -756,26 +805,40 @@ def _build_source_all_sections(ws, record, card_paths, llm, force=False):
             (os.path.basename(path), _read_file(path))
             for path in selected_paths
         ]
-        print(
-            f"  汇总{record['role_label']}《{record['file_name']}》全栏目 "
-            f"{step_index}/{total_steps}"
+        checkpoint_path = os.path.join(source_partials_dir, f"partial_{step_index:03d}.md")
+        current_summary = _load_fresh_checkpoint(
+            checkpoint_path,
+            [*selected_paths, previous_checkpoint],
+            WORLD_SECTION_NAMES,
+            force=force,
         )
-        current_summary = _run_prompt(
-            llm,
-            "world_knowledge_merge_all_sections",
-            dict(
-                merge_task=(
-                    f"资料级全栏目串行汇总：为{record['role_label']}《{record['file_name']}》"
-                    "构建完整的7栏目资料知识库。本轮只读取2个新的资料卡片和上一轮阶段摘要；"
-                    "请在同一资料内部去重、补充和纠错，不要与其他资料做主次裁决。"
+        if current_summary:
+            print(
+                f"  断点续传{record['role_label']}《{record['file_name']}》全栏目 "
+                f"{step_index}/{total_steps}"
+            )
+        else:
+            print(
+                f"  汇总{record['role_label']}《{record['file_name']}》全栏目 "
+                f"{step_index}/{total_steps}"
+            )
+            current_summary = _run_prompt(
+                llm,
+                "world_knowledge_merge_all_sections",
+                dict(
+                    merge_task=(
+                        f"资料级全栏目串行汇总：为{record['role_label']}《{record['file_name']}》"
+                        "构建完整的7栏目资料知识库。本轮只读取2个新的资料卡片和上一轮阶段摘要；"
+                        "请在同一资料内部去重、补充和纠错，不要与其他资料做主次裁决。"
+                    ),
+                    previous_summary=_compact_world_document(previous_summary),
+                    knowledge_cards=_format_knowledge_items(card_items),
                 ),
-                previous_summary=_compact_world_document(previous_summary),
-                knowledge_cards=_format_knowledge_items(card_items),
-            ),
-            os.path.join(source_partials_dir, f"partial_{step_index:03d}.md"),
-            required_headings=WORLD_SECTION_NAMES,
-        )
+                checkpoint_path,
+                required_headings=WORLD_SECTION_NAMES,
+            )
         previous_summary = current_summary
+        previous_checkpoint = checkpoint_path
 
     return _write_sections_to_source(ws, record, _split_sections_from_document(current_summary))
 
@@ -884,6 +947,7 @@ def _integrate_final_sections(ws, source_items, llm, force=False, max_workers=No
         _write_sections_to_final(ws, _split_sections_from_document(current_summary))
     else:
         os.makedirs(final_all_partials_dir, exist_ok=True)
+        previous_checkpoint = None
         for idx, item in enumerate(supplement_items, start=1):
             record = item["record"]
             supplement_paths = [
@@ -893,27 +957,44 @@ def _integrate_final_sections(ws, source_items, llm, force=False, max_workers=No
             ]
             if not supplement_paths:
                 continue
-            print(
-                f"  整合最终知识库全栏目：{record['file_name']} "
-                f"{idx}/{len(supplement_items)}"
+            checkpoint_path = os.path.join(
+                final_all_partials_dir, f"integrated_{idx:03d}_{record['id']}.md"
             )
-            current_summary = _run_prompt(
-                llm,
-                "world_knowledge_merge_all_sections",
-                dict(
-                    merge_task=(
-                        "最终全栏目串行整合：已有阶段摘要是主资料7栏目知识库及已整合补充资料，"
-                        f"本轮只整合补充资料《{record['file_name']}》的7栏目知识库。"
-                        "故事主线、核心事件顺序、核心因果、基础身份关系以主资料为准。"
-                        "力量体系、技能体系、关键物品、角色实力/背景、世界观细节允许补充资料进行公共化校正和完善。"
-                        "排除补充资料原创主角线、原创金手指和原创主线任务。"
+            current_checkpoint = _load_fresh_checkpoint(
+                checkpoint_path,
+                [*(path for _, path in supplement_paths), previous_checkpoint, *(path for _, path in primary_paths)],
+                WORLD_SECTION_NAMES,
+                force=force,
+            )
+            if current_checkpoint:
+                print(
+                    f"  断点续传最终知识库：{record['file_name']} "
+                    f"{idx}/{len(supplement_items)}"
+                )
+                current_summary = current_checkpoint
+            else:
+                print(
+                    f"  整合最终知识库全栏目：{record['file_name']} "
+                    f"{idx}/{len(supplement_items)}"
+                )
+                current_summary = _run_prompt(
+                    llm,
+                    "world_knowledge_merge_all_sections",
+                    dict(
+                        merge_task=(
+                            "最终全栏目串行整合：已有阶段摘要是主资料7栏目知识库及已整合补充资料，"
+                            f"本轮只整合补充资料《{record['file_name']}》的7栏目知识库。"
+                            "故事主线、核心事件顺序、核心因果、基础身份关系以主资料为准。"
+                            "力量体系、技能体系、关键物品、角色实力/背景、世界观细节允许补充资料进行公共化校正和完善。"
+                            "排除补充资料原创主角线、原创金手指和原创主线任务。"
+                        ),
+                        previous_summary=_compact_world_document(current_summary),
+                        knowledge_cards=_aggregate_sections(supplement_paths, max_chars=40000),
                     ),
-                    previous_summary=_compact_world_document(current_summary),
-                    knowledge_cards=_aggregate_sections(supplement_paths, max_chars=40000),
-                ),
-                os.path.join(final_all_partials_dir, f"integrated_{idx:03d}_{record['id']}.md"),
-                required_headings=WORLD_SECTION_NAMES,
-            )
+                    checkpoint_path,
+                    required_headings=WORLD_SECTION_NAMES,
+                )
+            previous_checkpoint = checkpoint_path
         _write_sections_to_final(ws, _split_sections_from_document(current_summary))
 
     legacy_path = os.path.join(_world_root(ws), "world_knowledge.md")
